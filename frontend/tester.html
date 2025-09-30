@@ -2,151 +2,273 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>GrantforgeUSA – Soft Test Portal</title>
+  <title>GrantforgeUSA — Soft Test Portal</title>
 
   <script>
-    // 🔗 Backend URL (update if needed)
+    /* Backend URL (kept for live mode later) */
     window.BACKEND_URL = "https://grantforgeusa-backend.onrender.com";
   </script>
 
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 2rem;
-      background: #f9f9f9;
-    }
-    .container {
-      max-width: 700px;
-      margin: auto;
-      background: white;
-      padding: 2rem;
-      border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-    }
-    input, select, textarea, button {
-      width: 100%;
-      margin: 0.5rem 0;
-      padding: 0.5rem;
-      font-size: 1rem;
-    }
-    button {
-      cursor: pointer;
-      background: #2d6cdf;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      padding: 0.75rem;
-    }
-    button:hover {
-      background: #1e4fbf;
-    }
-    .card {
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      padding: 1rem;
-      margin: 1rem 0;
-      background: #fafafa;
-    }
+    body { font-family: Arial, sans-serif; margin: 2rem; background: #f9f9f9; }
+    .container { max-width: 980px; margin: auto; background: #fff; padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,.08); }
+    input, select, textarea, button { width: 100%; margin: .5rem 0; padding: .6rem; font-size: 16px; }
+    button { cursor: pointer; background: #2d6cdf; color: #fff; border: 0; border-radius: 6px; }
+    button:hover { background: #1e4baf; }
+    .row { display: grid; gap: 1rem; grid-template-columns: 1fr 1fr; }
+    .card { border: 1px solid #e6e6e6; border-radius: 8px; padding: 1rem; margin: .75rem 0; background: #fafafa; }
+    .muted { color:#666; font-size: .9rem; }
+    .tags span { display:inline-block; border:1px solid #bbb; border-radius: 999px; padding:.15rem .6rem; margin:.15rem .3rem 0 0; font-size:.85rem; }
+    .pill { display:inline-block; background:#eef2ff; color:#223; border:1px solid #c7d2fe; border-radius:999px; padding:.2rem .6rem; font-size:.8rem; }
+    .right { text-align:right; }
+    .flex { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+    .small { font-size:.85rem; color:#555; }
+    .divider { border-top:1px dashed #ddd; margin: 1rem 0; }
+    .demoBadge { background:#111827; color:#fff; padding:.2rem .5rem; border-radius:6px; font-size:.75rem; margin-left:.5rem; }
+    .bigCenter { text-align:center; padding:2rem 1rem; }
+    .bigCenter h2 { font-size:1.8rem; margin:.5rem 0; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>GrantforgeUSA – Soft Test Portal</h1>
+<div class="container">
+  <h1>GrantforgeUSA — Soft Test Portal
+    <span id="modeBadge" class="demoBadge">DEMO MODE</span>
+  </h1>
 
-    <!-- Tester Info -->
-    <div class="card">
-      <label>Tester Name</label>
-      <input id="tester" placeholder="e.g., Jordan A." />
-
-      <label>Category</label>
-      <select id="category">
-        <option>Education</option>
-        <option>Small Business</option>
-        <option>City/Community</option>
-        <option>Faith-based</option>
-      </select>
-
-      <button onclick="startTest()">Make Link</button>
+  <!-- Tester + Category -->
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Tester name</label>
+        <input id="tester" placeholder="e.g., Jordan A." />
+      </div>
+      <div>
+        <label>Category</label>
+        <select id="category">
+          <option>Education</option>
+          <option>Small Business</option>
+          <option>City/Community</option>
+          <option>Faith-based</option>
+        </select>
+      </div>
     </div>
 
-    <!-- Grant Matches -->
-    <div id="results"></div>
+    <div class="row">
+      <div>
+        <label>Project title</label>
+        <input id="title" placeholder="e.g., After-School STEM Labs" />
+      </div>
+      <div>
+        <label>Requested amount (USD)</label>
+        <input id="amount" type="number" min="0" step="1000" placeholder="e.g., 120000" />
+      </div>
+    </div>
 
-    <!-- Draft Output -->
-    <div id="draft"></div>
+    <label>Short summary</label>
+    <textarea id="summary" rows="3" placeholder="What you’re trying to fund…"></textarea>
+
+    <label>Keywords (comma-separated)</label>
+    <input id="keywords" placeholder="e.g., STEM, robotics, rural, 7th grade" />
+
+    <div class="flex">
+      <button id="save">Save inputs</button>
+      <span class="small muted">Inputs are saved locally per browser.</span>
+    </div>
   </div>
 
-  <script>
-    // Mock grant list
-    const grants = [
-      {id: "EDU-1123", title: "DOE Innovative STEM Pilot", tags: ["stem","robotics","k12"]},
-      {id: "CBO-4401", title: "Community Builders Microgrant", tags: ["community","after-school","nonprofit"]},
-      {id: "SBA-9002", title: "SBA Small Business Catalyst", tags: ["small business","startup","capital"]},
-      {id: "CITY-770", title: "Municipal Youth Engagement", tags: ["city","youth","engagement"]},
-      {id: "FAITH-3205", title: "Faith & Neighborhood Partnership", tags: ["church","faith","community"]}
-    ];
+  <!-- Demo Mode toggle -->
+  <div class="card">
+    <div class="flex">
+      <label><input type="checkbox" id="demoToggle" checked /> Use Demo Mode (training)</label>
+      <span class="pill">Live search activates when APIs are approved</span>
+    </div>
+    <div class="small muted">
+      In Demo Mode, generated drafts display a simple confirmation message so testers can learn the flow end-to-end.
+    </div>
+  </div>
 
-    function startTest() {
-      const tester = document.getElementById("tester").value.trim();
-      const category = document.getElementById("category").value;
+  <!-- Matches -->
+  <div id="results" class="card">
+    <div class="flex">
+      <button id="refresh">Find Matches</button>
+      <span class="small muted">Shows top matches for your category & keywords.</span>
+    </div>
+    <div id="matches"></div>
+  </div>
 
-      if (!tester) {
-        alert("Please enter a tester name.");
-        return;
-      }
+  <!-- Manual add -->
+  <div class="card">
+    <div class="flex">
+      <span class="pill">Optional</span>
+      <span class="small">Paste any public grant title & link to run the full flow.</span>
+    </div>
+    <div class="row">
+      <div>
+        <label>Grant Title</label>
+        <input id="manualTitle" placeholder="e.g., Community Innovation Fund — STEM Facilities Upgrade" />
+      </div>
+      <div>
+        <label>Grant Link (public URL)</label>
+        <input id="manualLink" placeholder="https://example.org/grant-detail/12345" />
+      </div>
+    </div>
+    <div class="right">
+      <button id="manualDraft">Generate Draft from this Grant</button>
+    </div>
+  </div>
 
-      // Show top 3 matches
-      const matches = grants.map(g => {
-        return {...g, score: scoreGrant(g, category)};
-      }).sort((a,b) => b.score - a.score).slice(0,3);
+  <!-- Output -->
+  <div id="draft" class="card"></div>
 
-      document.getElementById("results").innerHTML =
-        "<h2>Top Grant Matches</h2>" +
-        matches.map(m => `
-          <div class="card">
-            <strong>${m.title}</strong> (${m.id})<br/>
-            Fit Score: ${m.score}/100<br/>
-            <button onclick="makeDraft('${m.id}','${tester}','${category}')">
-              Generate Draft
-            </button>
+  <div class="small muted divider">
+    Built for soft testers — live data switches on automatically after API approval.
+  </div>
+</div>
+
+<script>
+  /* ---------- Curated list (for browsing feel; titles only) ---------- */
+  const CURATED = {
+    "Education": [
+      { id:"EDU-1123", title:"DOE Innovative STEM Pilot — Middle Grades Hands-On Labs", link:"#", tags:["STEM","k12","equipment"] },
+      { id:"EDU-2071", title:"NSF Expanding STEM Participation in Rural Schools", link:"#", tags:["NSF","rural","teacher PD"] },
+      { id:"EDU-3054", title:"State Education Facilities Improvement Mini-Grants", link:"#", tags:["facilities","matching"] }
+    ],
+    "Small Business": [
+      { id:"SBA-9002", title:"SBA Small Business Catalyst", link:"#", tags:["startup","capital"] },
+      { id:"SBT-4410", title:"Rural Microenterprise Development", link:"#", tags:["USDA","rural"] }
+    ],
+    "City/Community": [
+      { id:"CITY-7710", title:"Municipal Youth Engagement", link:"#", tags:["youth","engagement"] },
+      { id:"COMM-2210", title:"Community Facilities Direct Loans & Grants", link:"#", tags:["infrastructure","USDA"] }
+    ],
+    "Faith-based": [
+      { id:"FAITH-3205", title:"Faith & Neighborhood Partnership", link:"#", tags:["community","youth"] }
+    ]
+  };
+
+  const el = id => document.getElementById(id);
+  const badge = el("modeBadge");
+
+  const save = () => ["tester","title","amount","summary","keywords","category"]
+    .forEach(k => localStorage.setItem(k, el(k).value || el(k).innerText || ""));
+  const load = () => ["tester","title","amount","summary","keywords"].forEach(k => {
+    const v = localStorage.getItem(k); if (v) el(k).value = v;
+  });
+
+  function renderMatches(list) {
+    el("matches").innerHTML = list.slice(0, 6).map(g => `
+      <div class="card">
+        <div class="flex" style="justify-content:space-between; align-items:flex-start">
+          <div>
+            <strong>${g.title}</strong> <span class="muted">(${g.id})</span><br/>
+            <div class="tags">${(g.tags||[]).map(t=>`<span>${t}</span>`).join("")}</div>
           </div>
-        `).join("");
-    }
+          <div class="right">
+            <button onclick="makeDraft('${g.id}','${g.title.replace(/["']/g,'')}', '${(el('category').value||'').replace(/["']/g,'')}')">Generate Draft</button>
+          </div>
+        </div>
+      </div>
+    `).join("");
+  }
 
-    function scoreGrant(g, category) {
-      let score = 70; // baseline
-      if (g.tags.includes("k12") && category === "Education") score += 10;
-      if (g.tags.includes("startup") && category === "Small Business") score += 10;
-      if (g.tags.includes("youth") && category === "City/Community") score += 10;
-      if (g.tags.includes("faith") && category === "Faith-based") score += 10;
-      return Math.min(100, score);
-    }
+  async function findMatches() {
+    const cat = el("category").value;
+    const kw  = el("keywords").value;
+    const demo = el("demoToggle").checked;
 
-    async function makeDraft(grantId, tester, category) {
-      document.getElementById("draft").innerHTML = "⏳ Generating draft...";
+    badge.textContent = demo ? "DEMO MODE" : "LIVE MODE";
 
+    if (demo) {
+      renderMatches(CURATED[cat] || []);
+    } else {
+      // Live mode will work once APIs are enabled on the backend
+      const params = new URLSearchParams({
+        q: kw || cat,
+        category: cat,
+        limit: "6",
+        min_score: "60"
+      });
+      const url = `${window.BACKEND_URL}/opportunities?` + params.toString();
+      el("matches").innerHTML = `<div class="small">Searching live…</div>`;
       try {
-        const res = await fetch(window.BACKEND_URL + "/draft", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({grant_id: grantId, tester, category})
-        });
-
-        if (!res.ok) throw new Error("Backend error");
-
+        const res = await fetch(url);
         const data = await res.json();
-        document.getElementById("draft").innerHTML = `
-          <div class="card">
-            <h2>Draft for ${grantId}</h2>
-            <p><strong>Narrative:</strong> ${data.narrative}</p>
-            <p><strong>Checklist:</strong></p>
-            <ul>${data.checklist.map(c => `<li>${c}</li>`).join("")}</ul>
-          </div>
-        `;
-      } catch (err) {
-        document.getElementById("draft").innerHTML = "❌ Draft failed: " + err.message;
+        const list = (data.items || []);
+        if (!list.length) {
+          el("matches").innerHTML = `<div class="small">No live results yet. Switch on Demo Mode for training.</div>`;
+        } else {
+          renderMatches(list);
+        }
+      } catch (e) {
+        el("matches").innerHTML = `<div class="small">Live search not available. Switch on Demo Mode for training.</div>`;
       }
     }
-  </script>
+  }
+
+  async function makeDraft(grantId, oppTitle, category) {
+    save();
+    const demo = el("demoToggle").checked;
+
+    if (demo) {
+      // TRAINING OUTPUT (no model call)
+      el("draft").innerHTML = `
+        <div class="bigCenter">
+          <h2>Congratulations — you have completed training.</h2>
+          <div class="small muted">Next: switch to Live Mode when APIs are enabled to generate full narratives.</div>
+          <div class="divider"></div>
+          <div class="small"><strong>Selected Grant:</strong> ${oppTitle} <span class="muted">(${grantId})</span></div>
+        </div>`;
+      return;
+    }
+
+    // LIVE MODE (kept for when APIs are ready)
+    const tester = el("tester").value || "Tester";
+    const title = el("title").value || "Untitled Project";
+    const amount = Number(el("amount").value || 0);
+    const summary = el("summary").value || "";
+    const keywords = el("keywords").value || "";
+
+    el("draft").innerHTML = `<div class="small">Generating draft…</div>`;
+
+    try {
+      const res = await fetch(window.BACKEND_URL + "/draft", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({
+          tester, category, title, amount, summary, keywords,
+          grant_id: grantId, opp_title: oppTitle
+        })
+      });
+      const data = await res.json();
+      const narrative = (data.narrative || "").replace(/\n/g, "<br/>");
+      const checklist = (data.checklist || []).map(c=>`<li>${c}</li>`).join("");
+      el("draft").innerHTML = `
+        <h2>Draft for: ${oppTitle}</h2>
+        <div class="divider"></div>
+        <p>${narrative}</p>
+        <div class="divider"></div>
+        <strong>Checklist</strong>
+        <ul>${checklist}</ul>
+      `;
+    } catch (err) {
+      el("draft").innerHTML = `<div class="small">Draft failed: ${err}</div>`;
+    }
+  }
+
+  // Manual grant entry → Draft
+  el("manualDraft")?.addEventListener("click", () => {
+    const t = el("manualTitle").value.trim();
+    const l = el("manualLink").value.trim();
+    if (!t) { alert("Please enter a grant title"); return; }
+    makeDraft(l || "CUSTOM", t, el("category").value);
+  });
+
+  el("save").addEventListener("click", ()=>{ save(); alert("Saved"); });
+  el("refresh").addEventListener("click", findMatches);
+  el("demoToggle").addEventListener("change", findMatches);
+
+  load();
+  findMatches();
+</script>
 </body>
 </html>
