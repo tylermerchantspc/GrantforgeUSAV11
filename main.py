@@ -1,13 +1,10 @@
-# GrantForgeUSA v1 — Live Grants.gov (RSS) search + Gemini drafting
-# Works for ALL categories (Education, Small Business, City/Community, Faith-based/501c3, etc.)
+# GrantForgeUSA v1 — Live Grants.gov (RSS, lenient) + Gemini drafts
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import os, re, requests, html
 import xml.etree.ElementTree as ET
+import google.generativeai as genai
 
-# --------------------------------------------
-# Flask
-# --------------------------------------------
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
@@ -15,137 +12,123 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 def health():
     return jsonify(ok=True)
 
-# --------------------------------------------
-# Live Grants.gov (RSS)  — NO API KEY REQUIRED
-# --------------------------------------------
-# Official RSS feeds (public). We'll merge New + Modified by Category.
+# ----------------------- RSS (no key) -----------------------
 RSS_NEW_BY_CATEGORY = "https://www.grants.gov/rss/GG_NewOppByCategory.xml"
 RSS_MOD_BY_CATEGORY = "https://www.grants.gov/rss/GG_OppModByCategory.xml"
-
 HTTP_TIMEOUT = 25
 
-_illegal_xml_ctrls = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+_illegal_ctrls = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+_unescaped_amp = re.compile(r"&(?!(amp;|lt;|gt;|quot;|apos;|#[0-9]+;))", re.I)
+_strip_tags = re.compile(r"<.*?>", re.S)
 
-# Replace bare '&' with '&amp;' unless it's already an entity like &amp; or &#123;
-_unescaped_amp = re.compile(r"&(?!(amp;|lt;|gt;|quot;|apos;|#[0-9]+;))")
+def _sanitize_xml(s: str) -> str:
+    if not s: return ""
+    s = _illegal_ctrls.sub("", s)
+    s = _unescaped_amp.sub("&amp;", s)
+    return s
 
-def _sanitize_xml_text(txt: str) -> str:
-    if not txt:
-        return ""
-    # drop illegal control characters
-    txt = _illegal_xml_ctrls.sub("", txt)
-    # make sure & is safe for XML parsing
-    txt = _unescaped_amp.sub("&amp;", txt)
-    return txt
-
-def _fetch_rss(url: str) -> str:
+def _fetch_text(url: str) -> str:
     r = requests.get(url, timeout=HTTP_TIMEOUT)
     r.raise_for_status()
-    return r.text
+    # ignore undecodable bytes that break XML
+    return r.content.decode("utf-8", errors="ignore")
 
-def _parse_items(xml_text: str):
-    # Some feeds contain bad entities / control chars; sanitize first.
-    safe_xml = _sanitize_xml_text(xml_text)
-    root = ET.fromstring(safe_xml)
+def _parse_items_strict(xml_text: str):
+    safe = _sanitize_xml(xml_text)
+    root = ET.fromstring(safe)
     chan = root.find("./channel")
-    if chan is None:
-        return []
+    if chan is None: return []
     items = []
     for it in chan.findall("item"):
         title = (it.findtext("title") or "").strip()
-        link  = (it.findtext("link")  or "").strip()
+        link  = (it.findtext("link") or "").strip()
         desc  = (it.findtext("description") or "").strip()
         pub   = (it.findtext("pubDate") or "").strip()
         cat   = (it.findtext("category") or "").strip()
-        # derive a simple id from the URL
         opp_id = link.rsplit("/", 1)[-1] if "/" in link else link
-        # clean up description to plain text
-        clean_desc = re.sub("<.*?>", "", html.unescape(desc))
+        clean_desc = _strip_tags.sub("", html.unescape(desc)).strip()
         items.append({
-            "id": opp_id,
-            "title": title,
-            "link": link,
-            "category": cat,
-            "summary": clean_desc,
-            "pubDate": pub
+            "id": opp_id, "title": title, "link": link,
+            "category": cat, "summary": clean_desc, "pubDate": pub
         })
     return items
 
-def _keywords_for_category(category_hint: str) -> str:
-    c = (category_hint or "").lower()
-    if "educ" in c:
-        return "school,education,K12,STEM,classroom,students"
-    if "small" in c or "business" in c:
-        return "small business,SBA,startup,entrepreneur,capital"
-    if "city" in c or "community" in c or "municip" in c:
-        return "city,community,infrastructure,parks,health"
-    if "faith" in c or "church" in c:
-        return "faith,church,nonprofit,community,education,youth"
-    # default general
+# Fallback: lenient regex parser if XML is malformed
+_item_block = re.compile(r"<item\b[^>]*>(.*?)</item>", re.S|re.I)
+def _grab(tag, s):
+    m = re.search(rf"<{tag}\b[^>]*>(.*?)</{tag}>", s, re.S|re.I)
+    return html.unescape(m.group(1).strip()) if m else ""
+
+def _parse_items_lenient(xml_text: str):
+    items = []
+    for block in _item_block.findall(xml_text or ""):
+        title = _grab("title", block)
+        link  = _grab("link", block)
+        desc  = _grab("description", block)
+        pub   = _grab("pubDate", block)
+        cat   = _grab("category", block)
+        opp_id = link.rsplit("/", 1)[-1] if "/" in link else link
+        clean_desc = _strip_tags.sub("", desc).strip()
+        if title or link:
+            items.append({
+                "id": opp_id, "title": title, "link": link,
+                "category": cat, "summary": clean_desc, "pubDate": pub
+            })
+    return items
+
+def _fetch_and_parse(url: str):
+    txt = _fetch_text(url)
+    # try strict first
+    try:
+        return _parse_items_strict(txt)
+    except Exception:
+        # then lenient
+        return _parse_items_lenient(txt)
+
+def _keywords_for_category(cat: str) -> str:
+    c = (cat or "").lower()
+    if "educ" in c: return "school,education,K12,STEM,classroom,students"
+    if "small" in c or "business" in c: return "small business,SBA,startup,entrepreneur,capital"
+    if "city" in c or "community" in c or "municip" in c: return "city,community,infrastructure,parks,health"
+    if "faith" in c or "church" in c: return "faith,church,nonprofit,community,education,youth"
     return "community,nonprofit,education,workforce"
 
 def _score(item, q_words, category_hint):
-    score = 60  # baseline
+    score = 60
     text = f"{item.get('title','')} {item.get('summary','')} {item.get('category','')}".lower()
     for w in q_words:
         w = (w or "").strip().lower()
-        if not w: 
-            continue
-        if w in text:
-            score += 8
-    if category_hint and category_hint.lower() in text:
-        score += 10
-    # small boost if Grants.gov title contains "program" or "grant"
-    if "program" in text or "grant" in text:
-        score += 4
+        if w and w in text: score += 8
+    if category_hint and category_hint.lower() in text: score += 10
+    if "program" in text or "grant" in text: score += 4
     return min(100, score)
 
 @app.get("/opportunities")
 def opportunities():
-    """
-    Returns live opportunities from Grants.gov RSS feeds (no API).
-      q: keywords (comma/space separated). If empty, derived from category.
-      category: string hint ('Education', 'Small Business', 'City/Community', 'Faith-based', etc.)
-      limit: number of items to return (default 5)
-      min_score: minimum score to include (default 70)
-    """
     q = (request.args.get("q") or "").strip()
     category = (request.args.get("category") or "").strip()
-    try:
-        limit = int(request.args.get("limit", "5"))
-    except ValueError:
-        limit = 5
-    try:
-        min_score = int(request.args.get("min_score", "70"))
-    except ValueError:
-        min_score = 70
+    try: limit = int(request.args.get("limit", "5"))
+    except: limit = 5
+    try: min_score = int(request.args.get("min_score", "70"))
+    except: min_score = 70
+    if not q: q = _keywords_for_category(category)
 
-    if not q:
-        q = _keywords_for_category(category)
-
-    # Fetch feeds; if one fails, continue with the other
-    items = []
-    errors = []
+    items, errors = [], []
     for url in (RSS_NEW_BY_CATEGORY, RSS_MOD_BY_CATEGORY):
         try:
-            xml = _fetch_rss(url)
-            items.extend(_parse_items(xml))
+            items.extend(_fetch_and_parse(url))
         except Exception as e:
             errors.append(f"{url}: {e}")
 
     if not items and errors:
-        # total failure — return helpful message but still valid JSON
         return jsonify(error="; ".join(errors), items=[]), 200
 
-    # score + dedupe + sort
     q_words = re.split(r"[,\s]+", q)
-    seen = set()
-    ranked = []
+    seen, ranked = set(), []
     for it in items:
-        item_id = it.get("id") or it.get("link")
-        if not item_id or item_id in seen:
-            continue
-        seen.add(item_id)
+        iid = it.get("id") or it.get("link")
+        if not iid or iid in seen: continue
+        seen.add(iid)
         it["score"] = _score(it, q_words, category)
         if it["score"] >= min_score:
             ranked.append(it)
@@ -153,11 +136,7 @@ def opportunities():
     ranked.sort(key=lambda x: x["score"], reverse=True)
     return jsonify(items=ranked[:limit], errors=errors), 200
 
-# --------------------------------------------
-# AI Draft (Gemini)
-# --------------------------------------------
-import google.generativeai as genai
-
+# ----------------------- /draft (Gemini) -----------------------
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
@@ -224,5 +203,3 @@ def draft():
         "Data collection & reporting plan in place",
     ]
     return jsonify(narrative=text, checklist=checklist), 200
-
-# done
