@@ -1,0 +1,31 @@
+﻿<!doctype html><html><head><meta charset="utf-8"><title>GrantforgeUSA – Soft Test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:16px system-ui,Segoe UI,Arial;margin:2rem;max-width:900px}
+.card{border:1px solid #ddd;border-radius:12px;padding:1rem;margin:1rem 0}
+label{display:block;margin:.5rem 0 .25rem}input,select,button,textarea{padding:.5rem;border:1px solid #bbb;border-radius:8px;width:100%}
+small{color:#666}</style></head><body>
+<h1>GrantforgeUSA – Soft Test Portal</h1>
+<div class="card">
+  <h2>Create Tester Link</h2>
+  <label>Tester name</label><input id="name" placeholder="e.g., Jordan A.">
+  <label>Category</label>
+  <select id="cat">
+    <option>Education</option><option>Church</option><option>Small Business</option>
+    <option>City/Municipality</option><option>501(c)(3)</option>
+  </select>
+  <button id="mk">Make Link</button>
+  <p id="out"></p>
+  <small>Each link carries a unique token so every tester sees their own draft and results.</small>
+</div>
+<script>
+const mk=document.getElementById('mk'), out=document.getElementById('out');
+mk.onclick=()=>{
+  const n=document.getElementById('name').value.trim()||'Tester';
+  const c=document.getElementById('cat').value;
+  const token=crypto.randomUUID();
+  const url=new URL(location.origin+location.pathname.replace('index.html','')+'tester.html');
+  url.searchParams.set('t',token); url.searchParams.set('n',n); url.searchParams.set('c',c);
+  out.innerHTML=`Link for <b>${n}</b> (${c}): <a href="${url}" target="_blank">${url}</a>`;
+};
+</script>
+</body></html>
