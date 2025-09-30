@@ -1,8 +1,7 @@
-# GrantForgeUSA v1 — Live Grants.gov (RSS, lenient) + Gemini drafts
+# GrantForgeUSA v1 — Path B: Live Grants.gov search (JSON API w/ HTML fallback) + Gemini drafts
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import os, re, requests, html
-import xml.etree.ElementTree as ET
+import os, re, html, json, requests
 import google.generativeai as genai
 
 app = Flask(__name__)
@@ -12,86 +11,16 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 def health():
     return jsonify(ok=True)
 
-# ----------------------- RSS (no key) -----------------------
-RSS_NEW_BY_CATEGORY = "https://www.grants.gov/rss/GG_NewOppByCategory.xml"
-RSS_MOD_BY_CATEGORY = "https://www.grants.gov/rss/GG_OppModByCategory.xml"
 HTTP_TIMEOUT = 25
 
-_illegal_ctrls = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
-_unescaped_amp = re.compile(r"&(?!(amp;|lt;|gt;|quot;|apos;|#[0-9]+;))", re.I)
-_strip_tags = re.compile(r"<.*?>", re.S)
-
-def _sanitize_xml(s: str) -> str:
-    if not s: return ""
-    s = _illegal_ctrls.sub("", s)
-    s = _unescaped_amp.sub("&amp;", s)
-    return s
-
-def _fetch_text(url: str) -> str:
-    r = requests.get(url, timeout=HTTP_TIMEOUT)
-    r.raise_for_status()
-    # ignore undecodable bytes that break XML
-    return r.content.decode("utf-8", errors="ignore")
-
-def _parse_items_strict(xml_text: str):
-    safe = _sanitize_xml(xml_text)
-    root = ET.fromstring(safe)
-    chan = root.find("./channel")
-    if chan is None: return []
-    items = []
-    for it in chan.findall("item"):
-        title = (it.findtext("title") or "").strip()
-        link  = (it.findtext("link") or "").strip()
-        desc  = (it.findtext("description") or "").strip()
-        pub   = (it.findtext("pubDate") or "").strip()
-        cat   = (it.findtext("category") or "").strip()
-        opp_id = link.rsplit("/", 1)[-1] if "/" in link else link
-        clean_desc = _strip_tags.sub("", html.unescape(desc)).strip()
-        items.append({
-            "id": opp_id, "title": title, "link": link,
-            "category": cat, "summary": clean_desc, "pubDate": pub
-        })
-    return items
-
-# Fallback: lenient regex parser if XML is malformed
-_item_block = re.compile(r"<item\b[^>]*>(.*?)</item>", re.S|re.I)
-def _grab(tag, s):
-    m = re.search(rf"<{tag}\b[^>]*>(.*?)</{tag}>", s, re.S|re.I)
-    return html.unescape(m.group(1).strip()) if m else ""
-
-def _parse_items_lenient(xml_text: str):
-    items = []
-    for block in _item_block.findall(xml_text or ""):
-        title = _grab("title", block)
-        link  = _grab("link", block)
-        desc  = _grab("description", block)
-        pub   = _grab("pubDate", block)
-        cat   = _grab("category", block)
-        opp_id = link.rsplit("/", 1)[-1] if "/" in link else link
-        clean_desc = _strip_tags.sub("", desc).strip()
-        if title or link:
-            items.append({
-                "id": opp_id, "title": title, "link": link,
-                "category": cat, "summary": clean_desc, "pubDate": pub
-            })
-    return items
-
-def _fetch_and_parse(url: str):
-    txt = _fetch_text(url)
-    # try strict first
-    try:
-        return _parse_items_strict(txt)
-    except Exception:
-        # then lenient
-        return _parse_items_lenient(txt)
-
+# ----------------------- Helpers -----------------------
 def _keywords_for_category(cat: str) -> str:
     c = (cat or "").lower()
-    if "educ" in c: return "school,education,K12,STEM,classroom,students"
-    if "small" in c or "business" in c: return "small business,SBA,startup,entrepreneur,capital"
-    if "city" in c or "community" in c or "municip" in c: return "city,community,infrastructure,parks,health"
-    if "faith" in c or "church" in c: return "faith,church,nonprofit,community,education,youth"
-    return "community,nonprofit,education,workforce"
+    if "educ" in c: return "school education STEM classroom students teacher k12"
+    if "small" in c or "business" in c: return "small business SBA startup entrepreneur capital"
+    if "city" in c or "community" in c or "municip" in c: return "city community infrastructure parks health"
+    if "faith" in c or "church" in c: return "faith church nonprofit community education youth"
+    return "community nonprofit education workforce"
 
 def _score(item, q_words, category_hint):
     score = 60
@@ -103,8 +32,92 @@ def _score(item, q_words, category_hint):
     if "program" in text or "grant" in text: score += 4
     return min(100, score)
 
+# ----------------------- Primary source: Grants.gov JSON Search -----------------------
+# NOTE: This endpoint is publicly reachable for keyword queries in many environments.
+# If it ever changes or rate-limits, the code falls back to HTML scraping.
+
+API_URL = "https://www.grants.gov/grantsws/rest/opportunities/search"
+
+def _search_grants_api(q: str, max_records: int = 25):
+    params = {
+        "keyword": q,
+        "oppStatuses": "OPEN",
+        "sortBy": "openDate|desc",
+        "startRecordNum": 1,
+        "maxRecords": max_records,
+    }
+    r = requests.get(API_URL, params=params, timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
+    data = r.json()
+    hits = data.get("oppHits") or data.get("opportunities") or []
+    items = []
+    for h in hits:
+        # Try common field names; ignore if missing
+        opp_id = str(h.get("opportunityId") or h.get("id") or h.get("opportunityNumber") or "")
+        title = (h.get("title") or h.get("opportunityTitle") or "").strip()
+        link  = (h.get("unformattedOpportunityURL") or h.get("opportunityUrl") or h.get("url") or "")
+        if not link and opp_id:
+            link = f"https://www.grants.gov/search-results-detail/{opp_id}"
+        summary = (h.get("synopsis") or h.get("summary") or h.get("description") or "").strip()
+        cat = ", ".join(h.get("categories", []) or h.get("category", []) or []) if isinstance(h.get("categories"), list) else (h.get("category") or "")
+        if title or link:
+            items.append({
+                "id": opp_id or link,
+                "title": title,
+                "link": link,
+                "summary": summary,
+                "category": cat
+            })
+    return items
+
+# ----------------------- Fallback: HTML search scraping -----------------------
+# If the JSON changes/blocks, scrape the public search page result cards.
+SEARCH_URL = "https://www.grants.gov/search-grants"
+
+# Basic patterns that are relatively stable:
+_card = re.compile(r'<a[^>]+href="(/search-results-detail/\d+)"[^>]*>(.*?)</a>', re.I|re.S)
+_strip_tags = re.compile(r"<.*?>", re.S)
+
+def _search_grants_html(q: str, max_records: int = 25):
+    r = requests.get(SEARCH_URL, params={"keyword": q}, timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
+    html_text = r.text
+
+    items = []
+    for m in _card.finditer(html_text):
+        href = m.group(1)
+        title_html = m.group(2)
+        title = _strip_tags.sub("", html.unescape(title_html)).strip()
+        link = f"https://www.grants.gov{href}"
+        opp_id = href.split("/")[-1]
+        # Try to grab a bit of surrounding content for summary
+        start = max(0, m.start() - 400)
+        chunk = html_text[start:m.end()+400]
+        # crude snippet
+        snippet = _strip_tags.sub("", html.unescape(chunk))
+        snippet = re.sub(r"\s+", " ", snippet).strip()
+        snippet = snippet[:400] + ("…" if len(snippet) > 400 else "")
+        items.append({
+            "id": opp_id,
+            "title": title,
+            "link": link,
+            "summary": snippet,
+            "category": ""
+        })
+        if len(items) >= max_records:
+            break
+    return items
+
+# ----------------------- Endpoint: /opportunities -----------------------
 @app.get("/opportunities")
 def opportunities():
+    """
+    Live Grants.gov search.
+      q: keywords (space/comma separated). If empty, derived from category.
+      category: hint to boost scoring
+      limit: default 5
+      min_score: default 70
+    """
     q = (request.args.get("q") or "").strip()
     category = (request.args.get("category") or "").strip()
     try: limit = int(request.args.get("limit", "5"))
@@ -114,27 +127,31 @@ def opportunities():
     if not q: q = _keywords_for_category(category)
 
     items, errors = [], []
-    for url in (RSS_NEW_BY_CATEGORY, RSS_MOD_BY_CATEGORY):
+    # Try JSON API first
+    try:
+        items = _search_grants_api(q, max_records=max(25, limit*3))
+    except Exception as e:
+        errors.append(f"API search failed: {e}")
+
+    # Fallback to HTML scraping if needed
+    if not items:
         try:
-            items.extend(_fetch_and_parse(url))
+            items = _search_grants_html(q, max_records=max(25, limit*3))
         except Exception as e:
-            errors.append(f"{url}: {e}")
+            errors.append(f"HTML search failed: {e}")
 
-    if not items and errors:
-        return jsonify(error="; ".join(errors), items=[]), 200
+    if not items:
+        return jsonify(items=[], errors=errors), 200
 
+    # Score + filter
     q_words = re.split(r"[,\s]+", q)
-    seen, ranked = set(), []
     for it in items:
-        iid = it.get("id") or it.get("link")
-        if not iid or iid in seen: continue
-        seen.add(iid)
         it["score"] = _score(it, q_words, category)
-        if it["score"] >= min_score:
-            ranked.append(it)
-
-    ranked.sort(key=lambda x: x["score"], reverse=True)
-    return jsonify(items=ranked[:limit], errors=errors), 200
+    items.sort(key=lambda x: x["score"], reverse=True)
+    filtered = [it for it in items if it["score"] >= min_score][:limit]
+    if not filtered:  # if filter too tight, return top N anyway
+        filtered = items[:limit]
+    return jsonify(items=filtered, errors=errors), 200
 
 # ----------------------- /draft (Gemini) -----------------------
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
