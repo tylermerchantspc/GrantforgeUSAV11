@@ -1,0 +1,21 @@
+{
+  "run_at_utc": "2025-10-09T05:35:09.306078",
+  "feeds_checked": [
+    "https://www.grants.gov/rss/GG_NewOppsByCategory.xml",
+    "https://www.grants.gov/rss/GG_OppModByCategory.xml",
+    "https://www.grants.gov/rss/GG_NewOppsByAgency.xml",
+    "https://www.grants.gov/rss/GG_OppModByAgency.xml"
+  ],
+  "new_records_fetched": 0,
+  "total_records_after_merge": 0,
+  "filter_keywords": [
+    "education",
+    "nonprofit",
+    "501(c)(3)",
+    "small business",
+    "church",
+    "community",
+    "youth",
+    "school"
+  ]
+}
