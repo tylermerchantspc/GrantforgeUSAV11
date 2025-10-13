@@ -190,6 +190,5 @@ def get_session():
         return jsonify(ok=False, error=str(e)), 400
 
 # ---------- dev server ----------
-if __name__ == "__main__":
-    # Local run
-    app.run(host="127.0.0.1", port=5001, debug=True)
+if __name__ == "__main__": port = int(os.getenv("PORT", "5000")) app.run(host="0.0.0.0",
+port=port, debug=False)
