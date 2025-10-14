@@ -1,29 +1,35 @@
-# GrantforgeUSA — v11 local/preview backend (TEST MODE)
-# Purpose: Stripe Checkout (test), PDF draft stub, lightweight CSV log, status probes
+# GrantforgeUSA — v11 backend (TEST MODE)
+# Purpose: Health, CORS-safe API for FE, Stripe Checkout (test), simple stubs
 
-import os, json
+import os
+import json
 from datetime import datetime
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import stripe
 from dotenv import load_dotenv
+
+# Optional: only needed for local PDF/CSV stub
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import pandas as pd
 
-# ---------- bootstrap env ----------
+# ---------------- bootstrap env ----------------
 load_dotenv()
 
-# Required Stripe keys
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")         # sk_test_...
-PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")   # pk_test_...
-assert stripe.api_key and PUBLISHABLE_KEY, "Stripe keys missing in .env"
+# Frontend base used for Stripe redirects (defaults to your Vercel URL)
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://grantforge-usav-11.vercel.app")
 
-# Redirect base (where to send user after checkout)
-# For LOCAL default we point to this Flask app, for Vercel set FRONTEND_URL to your vercel.app
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:5001")
+# Stripe keys (test mode)
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")          # sk_test_...
+PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")    # pk_test_...
 
-# Output dir for PDFs/CSV
+# Allow missing Stripe keys during pure API testing (no checkout)
+# If you want to force presence, uncomment the assert below.
+# assert stripe.api_key and PUBLISHABLE_KEY, "Stripe keys missing in .env"
+
+# Output dir for local stubs
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "v11_payment_data")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -31,76 +37,128 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 BASE_PRICE = 19.99
 TEACHER_PRICE = 9.99
 
-# ---------- Flask app ----------
+# ---------------- Flask app ----------------
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})  # OK for test; restrict in prod
 
-# ---------- helpers ----------
+# Strict CORS allowlist: Vercel site + local dev
+ALLOWED_ORIGINS = [
+    "https://grantforge-usav-11.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+CORS(
+    app,
+    resources={r"/*": {"origins": ALLOWED_ORIGINS}},
+    supports_credentials=False,
+)
+
+# ---------------- helpers ----------------
 def cents(x: float) -> int:
-    return int(round(x * 100))
+    return int(round(float(x) * 100))
 
 def make_pdf(order_id: str, payload: dict) -> str:
-    """
-    Creates a very simple one-page PDF stub as a stand-in for draft output.
-    """
+    """Creates a simple one-page PDF stub for testing."""
     pdf_path = os.path.join(OUTPUT_DIR, f"{order_id}.pdf")
     c = canvas.Canvas(pdf_path, pagesize=letter)
-
     c.drawString(50, 750, "GrantforgeUSA | Draft (TEST)")
     c.drawString(50, 730, f"Order: {order_id}")
     c.drawString(50, 710, f"Created: {datetime.utcnow().isoformat()}Z")
-
     y = 690
     for k, v in payload.items():
         c.drawString(50, y, f"{k}: {v}")
         y -= 18
-
     c.showPage()
     c.save()
     return pdf_path
 
-# ---------- health ----------
+# ---------------- health ----------------
 @app.get("/")
 def home():
-    return "<h2>GrantforgeUSA v11 Local Server</h2><p>Status: OK</p>"
+    return "<h2>GrantforgeUSA v11 Backend</h2><p>Status: OK</p>"
 
 @app.get("/get/health")
 def get_health():
-    return jsonify(ok=True, publishableKey=bool(PUBLISHABLE_KEY))
+    return jsonify(
+        ok=True,
+        publishableKey=bool(PUBLISHABLE_KEY),
+        frontendUrl=FRONTEND_URL,
+        allowedOrigins=ALLOWED_ORIGINS,
+        ts=datetime.utcnow().isoformat() + "Z",
+    )
 
-# ---------- checkout ----------
-@app.post("/create-checkout-session")
-def create_checkout_session():
-    """
-    Expected JSON body:
-    {
-      "name": "Tester",
-      "category": "Education" | "Small Business" | "City/Municipality" | "Church" | "501c",
-      "isTeacher": true/false
-    }
-    """
+# ---------------- grants shortlist stub (for Find Grants button) ----------------
+# This endpoint exists so the frontend has something to call.
+# Adjust the route name to match your frontend if needed.
+@app.post("/questionnaire")
+def questionnaire():
     try:
         data = request.get_json(force=True) or {}
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
 
-    # Normalize inputs with sensible defaults for manual testing
+    org = (data.get("organization") or data.get("org") or "Your Organization").strip()
+    keywords = (data.get("keywords") or data.get("keyword") or "general").strip()
+
+    # Simple static shortlist (replace later with real feed)
+    shortlist = [
+        {
+            "title": f"{keywords.title()} Community Support Grant",
+            "program": "GF-TEST-001",
+            "amount": "$25,000",
+            "deadline": "2025-12-31",
+            "fit": "High",
+        },
+        {
+            "title": f"{keywords.title()} Capacity Mini-Grant",
+            "program": "GF-TEST-002",
+            "amount": "$5,000",
+            "deadline": "2025-11-30",
+            "fit": "Medium",
+        },
+    ]
+    return jsonify(ok=True, organization=org, keywords=keywords, results=shortlist)
+
+# ---------------- simple draft stub (optional Draft button) ----------------
+@app.post("/draft")
+def draft():
+    try:
+        data = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify(ok=False, error="Invalid JSON"), 400
+
+    org = (data.get("organization") or "Your Organization").strip()
+    topic = (data.get("topic") or data.get("keywords") or "community").strip()
+
+    outline = {
+        "Summary": f"{org} seeks support for a {topic} initiative to serve local needs.",
+        "Need": f"There is a documented need around {topic} impacting our service area.",
+        "Objectives": ["Objective 1", "Objective 2", "Objective 3"],
+        "Methods": ["Method A", "Method B"],
+        "Budget Narrative": "Funds will support staff time, supplies, and outreach.",
+        "Impact": "Expected outcomes include improved access and measurable gains.",
+        "Compliance": "We will follow all program rules and reporting requirements.",
+    }
+    return jsonify(ok=True, outline=outline)
+
+# ---------------- Stripe Checkout (test) ----------------
+@app.post("/create-checkout-session")
+def create_checkout_session():
+    if not (stripe.api_key and PUBLISHABLE_KEY):
+        return jsonify(ok=False, error="Stripe test keys are not configured"), 400
+
+    try:
+        data = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify(ok=False, error="Invalid JSON"), 400
+
     name = (data.get("name") or "Tester").strip()
     category = (data.get("category") or "General").strip()
     is_teacher = bool(data.get("isTeacher"))
 
-    # Pricing rule
     price = TEACHER_PRICE if is_teacher and category.lower().startswith("education") else BASE_PRICE
+    product_name = f"Grant Draft ({category})" + (" — Teacher" if is_teacher else "")
 
-    # Naming
-    product_name = f"Grant Draft ({category})"
-    if is_teacher:
-        product_name += " — Teacher"
-
-    # Local order id (for files/logs)
     order_id = datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
-
-    # Metadata visible in Stripe Dashboard
     metadata = {
         "order_id": order_id,
         "name": name,
@@ -123,7 +181,6 @@ def create_checkout_session():
                     "quantity": 1,
                 }
             ],
-            # Redirects — FRONTEND_URL controls where this goes (Flask local or Vercel)
             success_url=f"{FRONTEND_URL}/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{FRONTEND_URL}/cancel",
             metadata=metadata,
@@ -131,19 +188,19 @@ def create_checkout_session():
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 400
 
-    # Lightweight CSV log so we know what we charged
-    log_path = os.path.join(OUTPUT_DIR, "payments_log.csv")
-    row = {
-        "ts_utc": datetime.utcnow().isoformat() + "Z",
-        "order_id": order_id,
-        "name": name,
-        "category": category,
-        "is_teacher": is_teacher,
-        "price": price,
-        "session_id": session.id,
-        "session_url": session.url,
-    }
+    # Lightweight CSV log; ignore failures
     try:
+        log_path = os.path.join(OUTPUT_DIR, "payments_log.csv")
+        row = {
+            "ts_utc": datetime.utcnow().isoformat() + "Z",
+            "order_id": order_id,
+            "name": name,
+            "category": category,
+            "is_teacher": is_teacher,
+            "price": price,
+            "session_id": session.id,
+            "session_url": session.url,
+        }
         if os.path.exists(log_path):
             df = pd.read_csv(log_path)
             df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
@@ -151,23 +208,17 @@ def create_checkout_session():
             df = pd.DataFrame([row])
         df.to_csv(log_path, index=False)
     except Exception:
-        # Don't block checkout if log write fails
         pass
 
-    # Make a test PDF stub (non-blocking)
+    # Optional test PDF
     try:
-        make_pdf(order_id, {
-            "name": name,
-            "category": category,
-            "teacher": is_teacher,
-            "price": price
-        })
+        make_pdf(order_id, {"name": name, "category": category, "teacher": is_teacher, "price": price})
     except Exception:
         pass
 
     return jsonify(ok=True, url=session.url, sessionId=session.id, publishableKey=PUBLISHABLE_KEY)
 
-# ---------- simple success/cancel pages (work locally; optional on Vercel) ----------
+# ---------------- success/cancel pages ----------------
 @app.get("/success")
 def success():
     session_id = request.args.get("session_id", "")
@@ -177,7 +228,7 @@ def success():
 def cancel():
     return "<h3>❌ Payment Cancelled</h3>"
 
-# ---------- optional session probe ----------
+# ---------------- optional session probe ----------------
 @app.get("/session")
 def get_session():
     session_id = request.args.get("id")
@@ -189,7 +240,7 @@ def get_session():
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 400
 
-# ---------- dev server ----------
+# ---------------- dev server ----------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=False)
