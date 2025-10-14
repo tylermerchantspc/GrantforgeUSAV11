@@ -1,8 +1,7 @@
 # GrantforgeUSA — v11 backend (TEST MODE)
-# Purpose: Health, CORS-safe API for FE, Stripe Checkout (test), simple stubs
+# Purpose: Health, CORS-safe API for FE, shortlist + draft stubs, Stripe test checkout
 
 import os
-import json
 from datetime import datetime
 
 from flask import Flask, request, jsonify
@@ -10,7 +9,7 @@ from flask_cors import CORS
 import stripe
 from dotenv import load_dotenv
 
-# Optional: only needed for local PDF/CSV stub
+# Optional stubs (PDF/CSV) — safe if not installed in prod
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import pandas as pd
@@ -18,46 +17,31 @@ import pandas as pd
 # ---------------- bootstrap env ----------------
 load_dotenv()
 
-# Frontend base used for Stripe redirects (defaults to your Vercel URL)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://grantforge-usav-11.vercel.app")
 
-# Stripe keys (test mode)
+# Stripe (test)
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")          # sk_test_...
 PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")    # pk_test_...
+# assert stripe.api_key and PUBLISHABLE_KEY, "Stripe keys missing in .env"  # enable if needed
 
-# Allow missing Stripe keys during pure API testing (no checkout)
-# If you want to force presence, uncomment the assert below.
-# assert stripe.api_key and PUBLISHABLE_KEY, "Stripe keys missing in .env"
-
-# Output dir for local stubs
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "v11_payment_data")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Pricing (USD)
 BASE_PRICE = 19.99
 TEACHER_PRICE = 9.99
 
 # ---------------- Flask app ----------------
 app = Flask(__name__)
 
-# Strict CORS allowlist: Vercel site + local dev
-ALLOWED_ORIGINS = [
-    "https://grantforge-usav-11.vercel.app",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-CORS(
-    app,
-    resources={r"/*": {"origins": ALLOWED_ORIGINS}},
-    supports_credentials=False,
-)
+# SIMPLE, WIDE-OPEN CORS FOR TESTING (fixes your console error)
+# tighten later to origins=["https://grantforge-usav-11.vercel.app"]
+CORS(app, origins="*")
 
 # ---------------- helpers ----------------
 def cents(x: float) -> int:
     return int(round(float(x) * 100))
 
 def make_pdf(order_id: str, payload: dict) -> str:
-    """Creates a simple one-page PDF stub for testing."""
     pdf_path = os.path.join(OUTPUT_DIR, f"{order_id}.pdf")
     c = canvas.Canvas(pdf_path, pagesize=letter)
     c.drawString(50, 750, "GrantforgeUSA | Draft (TEST)")
@@ -82,13 +66,10 @@ def get_health():
         ok=True,
         publishableKey=bool(PUBLISHABLE_KEY),
         frontendUrl=FRONTEND_URL,
-        allowedOrigins=ALLOWED_ORIGINS,
         ts=datetime.utcnow().isoformat() + "Z",
     )
 
-# ---------------- grants shortlist stub (for Find Grants button) ----------------
-# This endpoint exists so the frontend has something to call.
-# Adjust the route name to match your frontend if needed.
+# ---------------- shortlist stub (Find Grants) ----------------
 @app.post("/questionnaire")
 def questionnaire():
     try:
@@ -99,7 +80,6 @@ def questionnaire():
     org = (data.get("organization") or data.get("org") or "Your Organization").strip()
     keywords = (data.get("keywords") or data.get("keyword") or "general").strip()
 
-    # Simple static shortlist (replace later with real feed)
     shortlist = [
         {
             "title": f"{keywords.title()} Community Support Grant",
@@ -118,7 +98,7 @@ def questionnaire():
     ]
     return jsonify(ok=True, organization=org, keywords=keywords, results=shortlist)
 
-# ---------------- simple draft stub (optional Draft button) ----------------
+# ---------------- draft stub (Draft button) ----------------
 @app.post("/draft")
 def draft():
     try:
@@ -171,16 +151,14 @@ def create_checkout_session():
         session = stripe.checkout.Session.create(
             mode="payment",
             payment_method_types=["card"],
-            line_items=[
-                {
-                    "price_data": {
-                        "currency": "usd",
-                        "product_data": {"name": product_name},
-                        "unit_amount": cents(price),
-                    },
-                    "quantity": 1,
-                }
-            ],
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": product_name},
+                    "unit_amount": cents(price),
+                },
+                "quantity": 1,
+            }],
             success_url=f"{FRONTEND_URL}/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{FRONTEND_URL}/cancel",
             metadata=metadata,
@@ -188,7 +166,7 @@ def create_checkout_session():
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 400
 
-    # Lightweight CSV log; ignore failures
+    # best-effort CSV + PDF stubs (ignore failures)
     try:
         log_path = os.path.join(OUTPUT_DIR, "payments_log.csv")
         row = {
@@ -210,7 +188,6 @@ def create_checkout_session():
     except Exception:
         pass
 
-    # Optional test PDF
     try:
         make_pdf(order_id, {"name": name, "category": category, "teacher": is_teacher, "price": price})
     except Exception:
@@ -218,17 +195,7 @@ def create_checkout_session():
 
     return jsonify(ok=True, url=session.url, sessionId=session.id, publishableKey=PUBLISHABLE_KEY)
 
-# ---------------- success/cancel pages ----------------
-@app.get("/success")
-def success():
-    session_id = request.args.get("session_id", "")
-    return f"<h3>✅ Payment Success!</h3><p>Session ID: {session_id}</p>"
-
-@app.get("/cancel")
-def cancel():
-    return "<h3>❌ Payment Cancelled</h3>"
-
-# ---------------- optional session probe ----------------
+# ---------------- session probe ----------------
 @app.get("/session")
 def get_session():
     session_id = request.args.get("id")
