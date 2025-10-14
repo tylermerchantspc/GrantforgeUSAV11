@@ -187,10 +187,9 @@ def get_session():
         s = stripe.checkout.Session.retrieve(session_id)
         return jsonify(ok=True, status=s.status, payment_status=s.payment_status)
     except Exception as e:
-        return jsonify(ok=False,error=str(e)),400
+        return jsonify(ok=False, error=str(e)), 400
 
 # ---------- dev server ----------
-if _ _name_ _ == "_ _main_ _":
+if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=False)
-
