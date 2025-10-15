@@ -1,5 +1,5 @@
 # GrantforgeUSA — v11 backend (TEST MODE)
-# Purpose: Health, CORS-safe API for FE, shortlist + draft stubs, Stripe test checkout
+# Health, CORS-safe API for FE, shortlist + draft stubs, Stripe test checkout
 
 import os
 from datetime import datetime
@@ -9,7 +9,7 @@ from flask_cors import CORS
 import stripe
 from dotenv import load_dotenv
 
-# Optional stubs (PDF/CSV) — safe if not installed in prod
+# Optional stubs (safe to keep even if not used)
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import pandas as pd
@@ -22,7 +22,8 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "https://grantforge-usav-11.vercel.app"
 # Stripe (test)
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")          # sk_test_...
 PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")    # pk_test_...
-# assert stripe.api_key and PUBLISHABLE_KEY, "Stripe keys missing in .env"  # enable if needed
+# To require keys strictly, uncomment:
+# assert stripe.api_key and PUBLISHABLE_KEY, "Stripe keys missing in .env"
 
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "v11_payment_data")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -33,8 +34,7 @@ TEACHER_PRICE = 9.99
 # ---------------- Flask app ----------------
 app = Flask(__name__)
 
-# SIMPLE, WIDE-OPEN CORS FOR TESTING (fixes your console error)
-# tighten later to origins=["https://grantforge-usav-11.vercel.app"]
+# Wide-open CORS for testing (keeps browser happy). Tighten later if desired.
 CORS(app, origins="*")
 
 # ---------------- helpers ----------------
@@ -97,6 +97,13 @@ def questionnaire():
         },
     ]
     return jsonify(ok=True, organization=org, keywords=keywords, results=shortlist)
+
+# ---- alias so older FE route still works ----
+@app.route("/find-grants", methods=["POST", "OPTIONS"])
+def find_grants_alias():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    return questionnaire()
 
 # ---------------- draft stub (Draft button) ----------------
 @app.post("/draft")
