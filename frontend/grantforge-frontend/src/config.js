@@ -1,5 +1,14 @@
-// src/config.js
-export const API_BASE = "https://grantforgeusa-api-804149063995.us-central1.run.app";
+// src/config.js — GrantforgeUSA v1.1
+// Central config for API base + endpoints
 
-const CONFIG = { API_BASE };
-export default CONFIG;
+export const API_BASE =
+  import.meta.env.VITE_API_BASE || "https://grantforgeusa-v11-backend.onrender.com";
+
+export const ENDPOINTS = {
+  health: `${API_BASE}/get/health`,
+  shortlist: `${API_BASE}/questionnaire`,
+  draft: `${API_BASE}/draft`,
+  checkout: `${API_BASE}/create-checkout-session`,
+};
+
+export default { API_BASE, ENDPOINTS };
