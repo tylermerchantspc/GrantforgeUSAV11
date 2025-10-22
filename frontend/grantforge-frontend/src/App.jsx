@@ -1,164 +1,287 @@
-// src/App.jsx — v11.1 vertical mobile-first layout
+// src/App.jsx — v11.1 vertical flow (intake → recommend → checkout)
 import { useState } from "react";
-import { API_BASE } from "./config";
-import { apiHealth, getShortlist } from "./fetcher";
-import "./App.css";
+import { API_BASE, ENDPOINTS } from "./config";
 
-const CATEGORIES = [
-  "Teacher (Classroom)",
-  "School",
-  "501c3",
-  "Church / Faith-based",
-  "Community Club / Nonprofit (non-501c3)",
-  "Small Business",
-  "Municipality (City/County)"
-];
+// helper: POST JSON
+async function postJSON(url, body) {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
 
 export default function App() {
+  // intake
   const [org, setOrg] = useState("");
-  const [cat, setCat] = useState(CATEGORIES[0]);
+  const [who, setWho] = useState(""); // category
   const [keywords, setKeywords] = useState("");
-  const [reqAmt, setReqAmt] = useState("");
+  const [amount, setAmount] = useState("");
   const [budget, setBudget] = useState("");
+  const [title, setTitle] = useState("");
   const [timeline, setTimeline] = useState("");
-  const [projectTitle, setProjectTitle] = useState("");
   const [audience, setAudience] = useState("");
 
-  const [status, setStatus] = useState("");
-  const [view, setView] = useState("intake"); // intake | shortlist
+  // UI states
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [step, setStep] = useState("intake"); // intake | recs
   const [results, setResults] = useState([]);
-  const [message, setMessage] = useState(null);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [checkingOut, setCheckingOut] = useState(false);
 
-  async function handleHealth() {
-    setStatus("Checking backend…");
-    try {
-      const h = await apiHealth();
-      setStatus(`Backend OK — ${new Date(h.ts).toLocaleTimeString()}`);
-    } catch {
-      setStatus("Health check failed");
-    }
+  // categories (teacher separated from schools)
+  const CATEGORIES = [
+    "Teacher (Classroom)",
+    "School (K–12)",
+    "Nonprofit (501c3)",
+    "Church / Faith-based",
+    "Small Business (≤ $500k)",
+    "Medium Business ($500k–$2M)",
+    "Large Organization ($2M+)",
+    "City / Municipality",
+    "Community Club / Civic Group",
+  ];
+
+  function currency(n) {
+    if (!n && n !== 0) return "";
+    const x = Number(n);
+    if (Number.isNaN(x)) return n;
+    return x.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   }
 
-  async function handleIntakeSubmit(e) {
-    e?.preventDefault?.();
-    setStatus("Scoring…");
-    setResults([]);
+  async function handleRecommend() {
+    setError("");
+    if (!org.trim() || !who.trim()) {
+      setError("Please enter your organization and choose a category.");
+      return;
+    }
+    setLoading(true);
     try {
       const payload = {
-        organization: org,
-        category: cat,
-        keywords,
-        amountRequested: reqAmt,
-        budget,
-        timeline,
-        projectTitle,
-        audience
+        organization: org.trim(),
+        who: who.trim(),
+        keywords: keywords.trim(),
+        amountRequested: Number(amount || 0),
+        annualBudget: Number(budget || 0),
+        title: title.trim(),
+        timeline: timeline.trim(),
+        audience: audience.trim(),
       };
-      const r = await getShortlist(payload);
-      setResults(r.results || []);
-      setMessage(r.message || null);
-      setView("shortlist");
-      setStatus("");
-    } catch (err) {
-      setStatus("Error: could not score opportunities.");
-      console.error(err);
+      const data = await postJSON(ENDPOINTS.shortlist, payload);
+      if (!data.ok) throw new Error(data.error || "Unable to get recommendations.");
+      setResults(data.results || []);
+      setSelectedIndex(-1);
+      setStep("recs");
+    } catch (e) {
+      setError(e.message || "Failed to fetch recommendations.");
+    } finally {
+      setLoading(false);
     }
   }
 
-  function backToIntake() {
-    setView("intake");
-    setMessage(null);
+  async function handleCheckout() {
+    setError("");
+    if (selectedIndex < 0) {
+      setError("Please choose one opportunity to continue.");
+      return;
+    }
+    const chosen = results[selectedIndex];
+
+    // price logic (per-draft; teacher gets $9.99)
+    const lower = (who || "").toLowerCase();
+    const isTeacher = lower.includes("teacher");
+    const price = isTeacher ? 9.99 : lower.includes("small business") ? 49.99 : lower.includes("medium business") ? 99.99 : lower.includes("large") ? 199.99 : lower.includes("school") ? 49.99 : lower.includes("nonprofit") ? 49.99 : lower.includes("church") ? 49.99 : lower.includes("city") ? 199.99 : 49.99;
+
+    setCheckingOut(true);
+    try {
+      const body = {
+        name: org.trim(),
+        category: who.trim(),
+        isTeacher: isTeacher,
+        // we also send what they chose so it can be logged/embedded in the PDF stub later if desired
+        chosenTitle: chosen.title,
+        chosenProgram: chosen.program || "",
+        chosenAmount: chosen.max_amount || chosen.min_amount || "",
+        price,
+      };
+      const data = await postJSON(ENDPOINTS.checkout, body);
+      if (!data.ok) throw new Error(data.error || "Checkout failed.");
+      // redirect to Stripe
+      window.location.href = data.url;
+    } catch (e) {
+      setError(e.message || "Checkout failed.");
+    } finally {
+      setCheckingOut(false);
+    }
   }
 
   return (
     <div className="container">
-      <header>
+      <div className="card vertical">
         <h1>GrantForgeUSA</h1>
-        <p className="verse">
-          “Unless the Lord builds the house, the builders labor in vain.” — Psalm 127:1
+        <p className="muted">
+          <em>“Unless the Lord builds the house, the builders labor in vain.” — Psalm 127:1</em>
         </p>
-        <small>
-          API: {API_BASE} —{" "}
-          <button onClick={handleHealth}>Check Health</button>
-          {status && <em> · {status}</em>}
-        </small>
-      </header>
 
-      {view === "intake" && (
-        <form onSubmit={handleIntakeSubmit} className="card vertical">
-          <h2>Tell us about your project (Free Intake)</h2>
+        {step === "intake" && (
+          <>
+            <h3>Tell us about your project <span className="dim">(Free Intake)</span></h3>
+            <p className="muted">Intake is free. You only pay if you want a full custom draft.</p>
 
-          <label>Organization</label>
-          <input value={org} onChange={e => setOrg(e.target.value)} required placeholder="Your Organization" />
+            <label>
+              Organization
+              <input
+                placeholder="Your Organization"
+                value={org}
+                onChange={(e) => setOrg(e.target.value)}
+              />
+            </label>
 
-          <label>Who are you?</label>
-          <select value={cat} onChange={e => setCat(e.target.value)}>
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+            <label>
+              Who are you?
+              <select value={who} onChange={(e) => setWho(e.target.value)}>
+                <option value="">Select a category…</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </label>
 
-          <label>Keywords (comma separated)</label>
-          <input value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="e.g. STEM, food, youth" />
+            <label>
+              Keywords (comma separated)
+              <input
+                placeholder="e.g., STEM, food, youth"
+                value={keywords}
+                onChange={(e) => setKeywords(e.target.value)}
+              />
+            </label>
 
-          <label>Amount Requested (USD)</label>
-          <input value={reqAmt} onChange={e => setReqAmt(e.target.value)} placeholder="e.g. 25000" />
+            <label>
+              Amount Requested (USD)
+              <input
+                type="number"
+                placeholder="e.g., 2500"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </label>
 
-          <label>Annual Budget (USD)</label>
-          <input value={budget} onChange={e => setBudget(e.target.value)} placeholder="e.g. 120000" />
+            <label>
+              Annual Budget (USD)
+              <input
+                type="number"
+                placeholder="e.g., 60000"
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+              />
+            </label>
 
-          <label>Project Title</label>
-          <input value={projectTitle} onChange={e => setProjectTitle(e.target.value)} placeholder="Short project name" />
+            <label>
+              Project Title
+              <input
+                placeholder="Short name of the project"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </label>
 
-          <label>Timeline</label>
-          <input value={timeline} onChange={e => setTimeline(e.target.value)} placeholder="When will the project run?" />
+            <label>
+              Timeline
+              <input
+                placeholder="What do you need & when?"
+                value={timeline}
+                onChange={(e) => setTimeline(e.target.value)}
+              />
+            </label>
 
-          <label>Audience / Who benefits?</label>
-          <textarea
-            value={audience}
-            onChange={e => setAudience(e.target.value)}
-            placeholder="Students, veterans, local families, etc."
-          />
+            <label>
+              Audience / Who benefits?
+              <input
+                placeholder="Who is served (students, veterans, community, etc.)"
+                value={audience}
+                onChange={(e) => setAudience(e.target.value)}
+              />
+            </label>
 
-          <button type="submit" className="submit-btn">
-            See Recommendations
-          </button>
+            {error && <div className="warn">{error}</div>}
 
-          <p className="muted">
-            Intake is free. You only pay if you want your full draft.
-          </p>
-        </form>
-      )}
+            <button className="submit-btn" onClick={handleRecommend} disabled={loading}>
+              {loading ? "Working…" : "See Recommendations"}
+            </button>
 
-      {view === "shortlist" && (
-        <div className="card">
-          <h2>Recommended Opportunities</h2>
-          {message && <p className="warn">{message}</p>}
-          <p>Choose one to continue. We’ll generate a short preview for free; full drafts are paid.</p>
+            <small className="muted">
+              Private beta build · {new Date().getFullYear()}
+            </small>
+          </>
+        )}
 
-          <ul className="list">
-            {results.map((r, i) => (
-              <li key={i} className={!r.eligible ? "dim" : ""}>
-                <a href={r.program_url} target="_blank" rel="noreferrer" className="title">
-                  {r.title}
-                </a>
-                <div className="meta">
-                  {r.amount} — Deadline {r.deadline} — Match {r.requires_match_percent}% · Fit {r.fit} ({r.fit_score}%)
-                </div>
-                {!!(r.reasons && r.reasons.length) && (
-                  <div className="reasons">
-                    <strong>Notes:</strong> {r.reasons.join("; ")}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+        {step === "recs" && (
+          <>
+            <h3>Recommended Opportunities</h3>
+            <p className="muted">
+              Choose one opportunity to continue. We’ll create a full draft only if you decide to purchase.
+            </p>
 
-          <button onClick={backToIntake} className="back-btn">Back</button>
-        </div>
-      )}
+            <ul className="list">
+              {results.map((g, i) => (
+                <li key={i}>
+                  <label style={{ display: "flex", gap: "10px", alignItems: "flex-start", cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name="grantpick"
+                      checked={selectedIndex === i}
+                      onChange={() => setSelectedIndex(i)}
+                      style={{ marginTop: "6px" }}
+                    />
+                    <div>
+                      <a className="title" href={g.program_url || "#"} target="_blank" rel="noreferrer">
+                        {g.title}
+                      </a>
+                      <div className="meta">
+                        {g.max_amount || g.min_amount ? (
+                          <>
+                            {g.min_amount ? `${currency(g.min_amount)} ` : ""}
+                            {g.max_amount ? (g.min_amount ? "– " : "") + `${currency(g.max_amount)}` : ""}
+                            {" "}· Deadline {g.deadline || "TBD"}
+                          </>
+                        ) : (
+                          <>Deadline {g.deadline || "TBD"}</>
+                        )}
+                        {typeof g.fit === "number" && (
+                          <> — Fit <strong>{g.fit}%</strong></>
+                        )}
+                        {g.requires_match_percent > 0 && (
+                          <> — Match Required: {g.requires_match_percent}%</>
+                        )}
+                        {g.eligible_types?.length ? (
+                          <> — Eligible: {g.eligible_types.join(", ")}</>
+                        ) : null}
+                      </div>
+                    </div>
+                  </label>
+                </li>
+              ))}
+            </ul>
 
-      <footer>
-        <small>© {new Date().getFullYear()} GrantForgeUSA — Built with faith, for those who build their communities.</small>
-      </footer>
+            {error && <div className="warn" style={{ marginTop: 8 }}>{error}</div>}
+
+            <button className="submit-btn" onClick={handleCheckout} disabled={checkingOut}>
+              {checkingOut ? "Opening Checkout…" : "Get Full Custom Draft"}
+            </button>
+
+            <button className="back-btn" onClick={() => setStep("intake")} style={{ marginTop: 8 }}>
+              Back
+            </button>
+
+            <small className="muted" style={{ marginTop: 8 }}>
+              Intake is free. You’ll only be charged if you continue to purchase a draft.
+            </small>
+          </>
+        )}
+      </div>
     </div>
   );
 }
