@@ -1,7 +1,7 @@
-// src/App.jsx — v11 Intake → Recommendations (money-match aware)
+// src/App.jsx — v11.1 vertical mobile-first layout
 import { useState } from "react";
-import { API_BASE, ENDPOINTS } from "./config";
-import { apiHealth, getShortlist, getDraft } from "./fetcher";
+import { API_BASE } from "./config";
+import { apiHealth, getShortlist } from "./fetcher";
 import "./App.css";
 
 const CATEGORIES = [
@@ -23,7 +23,6 @@ export default function App() {
   const [timeline, setTimeline] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
   const [audience, setAudience] = useState("");
-  const [outcomes, setOutcomes] = useState("");
 
   const [status, setStatus] = useState("");
   const [view, setView] = useState("intake"); // intake | shortlist
@@ -34,7 +33,7 @@ export default function App() {
     setStatus("Checking backend…");
     try {
       const h = await apiHealth();
-      setStatus(`OK — ${h.grantsCount} local programs · ${new Date(h.ts).toLocaleTimeString()}`);
+      setStatus(`Backend OK — ${new Date(h.ts).toLocaleTimeString()}`);
     } catch {
       setStatus("Health check failed");
     }
@@ -53,8 +52,7 @@ export default function App() {
         budget,
         timeline,
         projectTitle,
-        audience,
-        outcomes
+        audience
       };
       const r = await getShortlist(payload);
       setResults(r.results || []);
@@ -74,70 +72,59 @@ export default function App() {
 
   return (
     <div className="container">
-      <header style={{ marginBottom: 18 }}>
+      <header>
         <h1>GrantForgeUSA</h1>
-        <p style={{ margin: 0, color: "#666" }}>
+        <p className="verse">
           “Unless the Lord builds the house, the builders labor in vain.” — Psalm 127:1
         </p>
-        <small>API: {API_BASE} — <button onClick={handleHealth}>Check Health</button> {status && <em> · {status}</em>}</small>
+        <small>
+          API: {API_BASE} —{" "}
+          <button onClick={handleHealth}>Check Health</button>
+          {status && <em> · {status}</em>}
+        </small>
       </header>
 
       {view === "intake" && (
-        <form onSubmit={handleIntakeSubmit} className="card">
-          <h2>Tell us about your project (free)</h2>
-          <div className="row">
-            <label>Organization</label>
-            <input value={org} onChange={e => setOrg(e.target.value)} placeholder="Your Organization" required />
-          </div>
+        <form onSubmit={handleIntakeSubmit} className="card vertical">
+          <h2>Tell us about your project (Free Intake)</h2>
 
-          <div className="row">
-            <label>Who are you?</label>
-            <select value={cat} onChange={e => setCat(e.target.value)}>
-              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
+          <label>Organization</label>
+          <input value={org} onChange={e => setOrg(e.target.value)} required placeholder="Your Organization" />
 
-          <div className="row">
-            <label>Keywords (comma separated)</label>
-            <input value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="after-school, STEM, equipment" />
-          </div>
+          <label>Who are you?</label>
+          <select value={cat} onChange={e => setCat(e.target.value)}>
+            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
 
-          <div className="row two">
-            <div>
-              <label>Amount Requested (USD)</label>
-              <input value={reqAmt} onChange={e => setReqAmt(e.target.value)} placeholder="e.g. 25000" />
-            </div>
-            <div>
-              <label>Annual Budget (USD)</label>
-              <input value={budget} onChange={e => setBudget(e.target.value)} placeholder="e.g. 120000" />
-            </div>
-          </div>
+          <label>Keywords (comma separated)</label>
+          <input value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="e.g. STEM, food, youth" />
 
-          <div className="row">
-            <label>Project Title</label>
-            <input value={projectTitle} onChange={e => setProjectTitle(e.target.value)} placeholder="Short name of the project" />
-          </div>
+          <label>Amount Requested (USD)</label>
+          <input value={reqAmt} onChange={e => setReqAmt(e.target.value)} placeholder="e.g. 25000" />
 
-          <div className="row">
-            <label>Timeline</label>
-            <input value={timeline} onChange={e => setTimeline(e.target.value)} placeholder="When do you expect to start/finish?" />
-          </div>
+          <label>Annual Budget (USD)</label>
+          <input value={budget} onChange={e => setBudget(e.target.value)} placeholder="e.g. 120000" />
 
-          <div className="row">
-            <label>Audience / Who benefits?</label>
-            <textarea value={audience} onChange={e => setAudience(e.target.value)} placeholder="Students, veterans, neighborhood, etc." />
-          </div>
+          <label>Project Title</label>
+          <input value={projectTitle} onChange={e => setProjectTitle(e.target.value)} placeholder="Short project name" />
 
-          <div className="row">
-            <label>Expected Outcomes (1–3)</label>
-            <textarea value={outcomes} onChange={e => setOutcomes(e.target.value)} placeholder="Measurable results you expect" />
-          </div>
+          <label>Timeline</label>
+          <input value={timeline} onChange={e => setTimeline(e.target.value)} placeholder="When will the project run?" />
 
-          <div className="row">
-            <button type="submit">See Recommendations</button>
-          </div>
+          <label>Audience / Who benefits?</label>
+          <textarea
+            value={audience}
+            onChange={e => setAudience(e.target.value)}
+            placeholder="Students, veterans, local families, etc."
+          />
 
-          <p className="muted">Intake is free. You only pay if you want a full custom draft.</p>
+          <button type="submit" className="submit-btn">
+            See Recommendations
+          </button>
+
+          <p className="muted">
+            Intake is free. You only pay if you want your full draft.
+          </p>
         </form>
       )}
 
@@ -145,37 +132,32 @@ export default function App() {
         <div className="card">
           <h2>Recommended Opportunities</h2>
           {message && <p className="warn">{message}</p>}
-          <p>Choose one to continue. We’ll generate a short preview for free; the full draft is paid.</p>
+          <p>Choose one to continue. We’ll generate a short preview for free; full drafts are paid.</p>
 
           <ul className="list">
             {results.map((r, i) => (
               <li key={i} className={!r.eligible ? "dim" : ""}>
-                <div className="row space">
-                  <div>
-                    <a href={r.program_url} target="_blank" rel="noreferrer" className="title">{r.title}</a>
-                    <div className="meta">
-                      {r.amount} — Deadline {r.deadline} — Match {r.requires_match_percent}%
-                      {" · "}Fit {r.fit} ({r.fit_score}%){!r.eligible ? " — Not eligible" : ""}
-                    </div>
-                  </div>
+                <a href={r.program_url} target="_blank" rel="noreferrer" className="title">
+                  {r.title}
+                </a>
+                <div className="meta">
+                  {r.amount} — Deadline {r.deadline} — Match {r.requires_match_percent}% · Fit {r.fit} ({r.fit_score}%)
                 </div>
                 {!!(r.reasons && r.reasons.length) && (
                   <div className="reasons">
-                    <strong>Why / Notes:</strong> {r.reasons.join("; ")}
+                    <strong>Notes:</strong> {r.reasons.join("; ")}
                   </div>
                 )}
               </li>
             ))}
           </ul>
 
-          <div className="row">
-            <button onClick={backToIntake}>Back</button>
-          </div>
+          <button onClick={backToIntake} className="back-btn">Back</button>
         </div>
       )}
 
-      <footer style={{ marginTop: 40 }}>
-        <small>© {new Date().getFullYear()} GrantForgeUSA. Intake & preview free. Draft fee shown before payment.</small>
+      <footer>
+        <small>© {new Date().getFullYear()} GrantForgeUSA — Built with faith, for those who build their communities.</small>
       </footer>
     </div>
   );
