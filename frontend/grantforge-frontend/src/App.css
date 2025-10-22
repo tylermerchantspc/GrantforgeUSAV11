@@ -87,4 +87,35 @@ button:hover {
   border: 1px solid #d0e6fb;
   border-radius: 8px;
   margin-top: 20px;
+} .container {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px;
+}
+form.vertical label {
+  display: block;
+  margin-top: 10px;
+  font-weight: 600;
+}
+form.vertical input,
+form.vertical select,
+form.vertical textarea {
+  width: 100%;
+  padding: 8px;
+  margin-top: 4px;
+  box-sizing: border-box;
+}
+.submit-btn, .back-btn {
+  margin-top: 20px;
+  width: 100%;
+  padding: 12px;
+  background-color: #0074d9;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.submit-btn:hover, .back-btn:hover {
+  background-color: #005fa3;
 }
