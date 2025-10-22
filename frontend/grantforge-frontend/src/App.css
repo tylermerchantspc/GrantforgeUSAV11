@@ -1,198 +1,136 @@
-/* App.css — Polished UI */
+/* src/App.css — vertical, mobile-first layout */
 
-body {
-  margin: 0;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: linear-gradient(135deg, #eef2f3, #dfe6e9);
-  color: #2d3436;
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 40px;
-}
-
-.container {
-  background: white;
-  border-radius: 12px;
-  padding: 30px;
-  max-width: 800px;
-  width: 100%;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-}
-
-h1 {
-  margin-bottom: 20px;
-  color: #0984e3;
-  font-size: 2.2rem;
-}
-
-form {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-
-input {
-  flex: 1;
-  padding: 10px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-}
-
-button {
-  background: #0984e3;
-  color: white;
-  border: none;
-  padding: 10px 16px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-  transition: background 0.2s;
-}
-
-button:hover {
-  background: #074e91;
-}
-
-.results {
-  margin-top: 20px;
-}
-
-.grant {
-  padding: 15px;
-  margin-bottom: 15px;
-  border: 1px solid #eee;
-  border-radius: 8px;
-  background: #fafafa;
-}
-
-.grant h3 {
-  margin: 0 0 10px;
-}
-
-.actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.actions button {
-  flex: 1;
-}
-
-.draft-box {
-  background: #f1f8ff;
-  padding: 15px;
-  border: 1px solid #d0e6fb;
-  border-radius: 8px;
-  margin-top: 20px;
-} .container {
-  max-width: 640px;
-  margin: 0 auto;
-  padding: 16px;
-}
-form.vertical label {
-  display: block;
-  margin-top: 10px;
-  font-weight: 600;
-}
-form.vertical input,
-form.vertical select,
-form.vertical textarea {
-  width: 100%;
-  padding: 8px;
-  margin-top: 4px;
-  box-sizing: border-box;
-}
-.submit-btn, .back-btn {
-  margin-top: 20px;
-  width: 100%;
-  padding: 12px;
-  background-color: #0074d9;
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 1rem;
-}
-.submit-btn:hover, .back-btn:hover {
-  background-color: #005fa3;
-}
-/* === v11.1 vertical stack override === */
-html, body {
-  width: 100%;
-  max-width: 100%;
-  overflow-x: hidden;          /* kill sideways scroll */
+:root {
+  --bg: #eef5fb;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: #5b7083;
+  --primary: #1e90ff;
+  --primary-600: #1876cc;
+  --border: #d0d7de;
+  --shadow: 0 8px 24px rgba(0,0,0,0.08);
+  --radius: 14px;
 }
 
 * { box-sizing: border-box; }
 
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  color: var(--text);
+  background: var(--bg);
+}
+
 .container {
-  max-width: 560px;            /* phone-first, grows a little on desktop */
-  margin: 0 auto;
-  padding: 16px;
+  max-width: 720px;
+  margin: 28px auto;
+  padding: 0 16px;
 }
 
-.card {
-  background: #fff;
-  border-radius: 10px;
-  padding: 16px;
-  box-shadow: 0 4px 18px rgba(0,0,0,0.06);
-}
-
-/* FORCE vertical layout */
 .card.vertical {
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 12px;
+  width: 100%;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
 }
 
-/* Labels + controls are full-width */
-.card.vertical label {
-  display: block !important;
-  margin-top: 6px;
+h1 {
+  margin: 0 0 6px 0;
+  font-size: 32px;
+  line-height: 1.2;
+}
+
+h3 {
+  margin: 18px 0 8px 0;
+  font-size: 20px;
+}
+
+.muted {
+  color: var(--muted);
+  margin: 0 0 12px 0;
+}
+
+.dim { color: var(--muted); font-weight: 500; }
+
+label {
+  display: block;
+  width: 100%;
+  margin: 12px 0;
   font-weight: 600;
 }
 
-.card.vertical input,
-.card.vertical select,
-.card.vertical textarea {
-  display: block !important;
-  width: 100% !important;
-  min-width: 0 !important;
-  max-width: 100% !important;
-  padding: 10px;
-  margin-top: 4px;
+label > input,
+label > select,
+label > textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  color: var(--text);
 }
 
-/* Buttons: full width, not fixed to the side */
-.submit-btn, .back-btn, .card.vertical button {
-  position: static !important;
-  width: 100% !important;
-  padding: 12px;
-  background: #0d6efd;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-size: 1rem;
+textarea { min-height: 104px; resize: vertical; }
+
+.submit-btn, .back-btn {
+  width: 100%;
+  margin-top: 10px;
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-weight: 700;
   cursor: pointer;
 }
 
-.submit-btn:hover, .back-btn:hover {
-  background: #0a58ca;
+.submit-btn {
+  background: var(--primary);
+  color: #fff;
+}
+.submit-btn:hover { background: var(--primary-600); }
+
+.back-btn {
+  background: #f1f5f9;
+  color: var(--text);
 }
 
-/* Prevent any stray row/grid rules from older CSS */
-.row, .grid, .columns {
-  display: block !important;
+.warn {
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px solid #fed7aa;
+  padding: 10px 12px;
+  border-radius: 10px;
 }
 
-/* Small text helpers */
-.muted { color: #666; font-size: 0.9rem; }
-.warn  { color: #b45309; background: #fff7ed; padding: 8px; border-radius: 6px; }
-.list  { list-style: none; padding: 0; margin: 0; }
-.list li { padding: 10px 0; border-bottom: 1px solid #eee; }
-.list .title { font-weight: 600; text-decoration: none; color: #0a58ca; }
-.list .meta { color: #555; font-size: 0.95rem; margin-top: 4px; }
-.list .dim { opacity: 0.6; }
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0 0;
+}
+.list li {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.title {
+  color: #0a68d6;
+  font-weight: 700;
+  text-decoration: none;
+}
+.title:hover { text-decoration: underline; }
+
+.meta { color: var(--muted); margin-top: 4px; }
+
+/* Larger screens: keep vertical form but tighten spacing; buttons can sit side-by-side if desired */
+@media (min-width: 640px) {
+  .submit-btn, .back-btn { width: 100%; }
+}
