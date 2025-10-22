@@ -119,3 +119,80 @@ form.vertical textarea {
 .submit-btn:hover, .back-btn:hover {
   background-color: #005fa3;
 }
+/* === v11.1 vertical stack override === */
+html, body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;          /* kill sideways scroll */
+}
+
+* { box-sizing: border-box; }
+
+.container {
+  max-width: 560px;            /* phone-first, grows a little on desktop */
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.06);
+}
+
+/* FORCE vertical layout */
+.card.vertical {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px;
+}
+
+/* Labels + controls are full-width */
+.card.vertical label {
+  display: block !important;
+  margin-top: 6px;
+  font-weight: 600;
+}
+
+.card.vertical input,
+.card.vertical select,
+.card.vertical textarea {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  padding: 10px;
+  margin-top: 4px;
+}
+
+/* Buttons: full width, not fixed to the side */
+.submit-btn, .back-btn, .card.vertical button {
+  position: static !important;
+  width: 100% !important;
+  padding: 12px;
+  background: #0d6efd;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.submit-btn:hover, .back-btn:hover {
+  background: #0a58ca;
+}
+
+/* Prevent any stray row/grid rules from older CSS */
+.row, .grid, .columns {
+  display: block !important;
+}
+
+/* Small text helpers */
+.muted { color: #666; font-size: 0.9rem; }
+.warn  { color: #b45309; background: #fff7ed; padding: 8px; border-radius: 6px; }
+.list  { list-style: none; padding: 0; margin: 0; }
+.list li { padding: 10px 0; border-bottom: 1px solid #eee; }
+.list .title { font-weight: 600; text-decoration: none; color: #0a58ca; }
+.list .meta { color: #555; font-size: 0.95rem; margin-top: 4px; }
+.list .dim { opacity: 0.6; }
