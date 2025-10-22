@@ -1,0 +1,90 @@
+[
+  {
+    "title": "Community Support Grant",
+    "program_url": "https://example.org/csg",
+    "deadline": "2025-12-31",
+    "min_amount": 10000,
+    "max_amount": 50000,
+    "eligible_types": ["501c3", "church", "community", "municipality", "school"],
+    "tags": ["community", "capacity", "services"],
+    "requires_match_percent": 0,
+    "geo_scope": "US"
+  },
+  {
+    "title": "Capacity Mini-Grant",
+    "program_url": "https://example.org/cap-mini",
+    "deadline": "2025-11-30",
+    "min_amount": 2500,
+    "max_amount": 10000,
+    "eligible_types": ["501c3", "community", "school"],
+    "tags": ["capacity", "equipment", "planning"],
+    "requires_match_percent": 0,
+    "geo_scope": "US"
+  },
+  {
+    "title": "STEM Classroom Boost",
+    "program_url": "https://example.org/stem-class",
+    "deadline": "2025-10-30",
+    "min_amount": 1000,
+    "max_amount": 15000,
+    "eligible_types": ["teacher", "school"],
+    "tags": ["STEM", "classroom", "supplies", "technology"],
+    "requires_match_percent": 0,
+    "geo_scope": "US"
+  },
+  {
+    "title": "Small Business Innovation Fund",
+    "program_url": "https://example.org/sbif",
+    "deadline": "2026-03-31",
+    "min_amount": 15000,
+    "max_amount": 75000,
+    "eligible_types": ["small_business"],
+    "tags": ["innovation", "equipment", "training"],
+    "requires_match_percent": 10,
+    "geo_scope": "US"
+  },
+  {
+    "title": "Municipal Safe Streets",
+    "program_url": "https://example.org/safe-streets",
+    "deadline": "2026-01-15",
+    "min_amount": 20000,
+    "max_amount": 200000,
+    "eligible_types": ["municipality"],
+    "tags": ["infrastructure", "safety", "transportation"],
+    "requires_match_percent": 20,
+    "geo_scope": "US"
+  },
+  {
+    "title": "After-School Enrichment",
+    "program_url": "https://example.org/ase",
+    "deadline": "2025-12-01",
+    "min_amount": 5000,
+    "max_amount": 30000,
+    "eligible_types": ["501c3", "school", "community"],
+    "tags": ["youth", "education", "after-school", "tutoring"],
+    "requires_match_percent": 0,
+    "geo_scope": "US"
+  },
+  {
+    "title": "Faith & Neighborhood Microgrant",
+    "program_url": "https://example.org/fnm",
+    "deadline": "2026-02-28",
+    "min_amount": 1000,
+    "max_amount": 7500,
+    "eligible_types": ["church", "community"],
+    "tags": ["outreach", "food", "shelter"],
+    "requires_match_percent": 0,
+    "geo_scope": "US"
+  },
+  {
+    "title": "Career & Technical Education Tools",
+    "program_url": "https://example.org/cte-tools",
+    "deadline": "2025-12-15",
+    "min_amount": 10000,
+    "max_amount": 60000,
+    "eligible_types": ["school"],
+    "tags": ["CTE", "equipment", "workforce"],
+    "requires_match_percent": 5,
+    "geo_scope": "US"
+  }
+]
