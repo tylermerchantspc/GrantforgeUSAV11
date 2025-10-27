@@ -1,210 +1,175 @@
-// src/App.jsx — Intake → shortlist (with links) → preview → pay → download by session
+// src/App.jsx
 import { useState } from "react";
+import { shortlist, getPreview, createCheckoutSession } from "./fetcher";
 import { API_BASE } from "./config";
-
-async function api(path, body) {
-  const r = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body || {}),
-  });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
-}
+import "./App.css";
 
 export default function App() {
-  const [form, setForm] = useState({
-    organization: "",
-    category: "",
-    keywords: "",
-    amountRequested: "",
-    annualBudget: "",
-    projectTitle: "",
-    timeline: "",
-    audience: "",
-    notes: "",
-  });
-  const [results, setResults] = useState([]);
-  const [previews, setPreviews] = useState({});
-  const [err, setErr] = useState("");
-  const [paying, setPaying] = useState("");
+  // intake fields
+  const [org, setOrg] = useState("");
+  const [who, setWho] = useState("");
+  const [keywords, setKeywords] = useState("");
+  const [amountRequested, setAmountRequested] = useState("");
+  const [annualBudget, setAnnualBudget] = useState("");
+  const [projectTitle, setProjectTitle] = useState("");
+  const [timeline, setTimeline] = useState("");
+  const [audience, setAudience] = useState("");
+  const [notes, setNotes] = useState("");
 
-  function setField(k, v) {
-    setForm((s) => ({ ...s, [k]: v }));
+  // ui state
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState([]);   // grant rows
+  const [previews, setPreviews] = useState({}); // key: title -> text
+  const [error, setError] = useState("");
+
+  function intakePayload() {
+    return {
+      organization: org,
+      category: who,
+      keywords,
+      amountRequested: Number(amountRequested || 0),
+      annualBudget: Number(annualBudget || 0),
+      projectTitle,
+      timeline,
+      audience,
+      notes
+    };
   }
 
-  async function handleRecommend() {
-    setErr("");
-    setResults([]);
-    setPreviews({});
+  async function handleSeeRecommendations() {
+    setError(""); setLoading(true); setResults([]); setPreviews({});
     try {
-      const r = await api("/questionnaire", form);
-      if (!r.ok) throw new Error(r.error || "Bad response");
-      setResults(r.results || []);
-      if (!r.results || !r.results.length) {
-        setErr("No programs matched your inputs. Try adjusting keywords/amount.");
-      }
+      const data = await shortlist(intakePayload());
+      if (!data.ok) throw new Error(data.error || "Could not fetch recommendations.");
+      setResults(data.results || []);
     } catch (e) {
-      setErr("Could not fetch recommendations.");
-      console.error(e);
-    }
-  }
-
-  async function handlePreview(g) {
-    try {
-      const r = await api("/preview", { intake: form, grant: g });
-      if (r.ok) {
-        setPreviews((p) => ({ ...p, [g.id]: r.text }));
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  async function handlePay(g) {
-    setErr("");
-    setPaying(g.id);
-    try {
-      const r = await api("/create-checkout-session", { intake: form, grant: g });
-      if (!r.ok) throw new Error(r.error || "Stripe error");
-      window.location.href = r.url;
-    } catch (e) {
-      setErr("Payment could not start. Please try again.");
-      console.error(e);
+      setError(e.message);
     } finally {
-      setPaying("");
+      setLoading(false);
     }
   }
 
-  // Thank-you page (download)
-  if (window.location.pathname === "/thanks") {
-    const sid = new URLSearchParams(window.location.search).get("session_id") || "";
-    return (
-      <div style={{ maxWidth: 860, margin: "40px auto", fontFamily: "system-ui, sans-serif" }}>
-        <h1>GrantForgeUSA</h1>
-        <p><em>“Unless the Lord builds the house, the builders labor in vain.” — Psalm 127:1</em></p>
-        <h2>Payment Success</h2>
-        {sid ? (
-          <p>
-            <a href={`${API_BASE}/download-by-session?session_id=${encodeURIComponent(sid)}`}>
-              Download Draft PDF
-            </a>
-          </p>
-        ) : (
-          <p>Session confirmed.</p>
-        )}
-        <p>Keep this link for your records. You can request edits before submission.</p>
-        <footer style={{ marginTop: 32, fontSize: 12, opacity: 0.8 }}>
-          © 2025 GrantForgeUSA • This product uses AI to generate previews and draft language.
-          Review and edit before any submission.
-        </footer>
-      </div>
-    );
+  async function handlePreview(row) {
+    setError("");
+    try {
+      const data = await getPreview(intakePayload());
+      if (!data.ok) throw new Error(data.error || "Preview failed.");
+      setPreviews(p => ({ ...p, [row.title]: data.summary }));
+    } catch (e) {
+      setError(e.message);
+    }
   }
 
-  const categories = [
-    "Teacher (Classroom)",
-    "School / District",
-    "Small Nonprofit / Club / Small Business / Church",
-    "Medium Nonprofit (500k–2M)",
-    "Large Nonprofit / City / Municipality",
-    "Other",
-  ];
+  async function handlePay(row) {
+    setError(""); setLoading(true);
+    try {
+      const body = { ...intakePayload(), grant: row };
+      const data = await createCheckoutSession(body);
+      if (!data.ok) throw new Error(data.error || "Checkout failed.");
+      window.location.href = data.url; // Stripe hosted page
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <div style={{ maxWidth: 860, margin: "24px auto", fontFamily: "system-ui, sans-serif" }}>
-      <h1>GrantForgeUSA</h1>
-      <p><em>“Unless the Lord builds the house, the builders labor in vain.” — Psalm 127:1</em></p>
+    <div className="wrap">
+      <header className="brand">
+        <h1>GrantForgeUSA</h1>
+        <p><em>"Unless the Lord builds the house, the builders labor in vain."</em> — Psalm 127:1</p>
+      </header>
 
-      <h2>Tell us about your project (Free Intake)</h2>
-      <p style={{ marginTop: -6 }}>Intake is free. You only pay if you want a full custom draft.</p>
+      <section className="card">
+        <h2>Tell us about your project (Free Intake)</h2>
+        <p className="muted">Intake is free. You only pay if you want a full custom draft.</p>
 
-      <div style={{ display: "grid", gap: 10 }}>
-        <input
-          placeholder="Organization"
-          value={form.organization}
-          onChange={(e) => setField("organization", e.target.value)}
-        />
-        <select value={form.category} onChange={(e) => setField("category", e.target.value)}>
-          <option value="">Who are you? (Select a category)</option>
-          {categories.map((c) => (<option key={c} value={c}>{c}</option>))}
-        </select>
-        <input
-          placeholder="Keywords (comma separated) — e.g., STEM, food, youth"
-          value={form.keywords}
-          onChange={(e) => setField("keywords", e.target.value)}
-        />
-        <input
-          placeholder="Amount Requested (USD) — e.g., 2500"
-          value={form.amountRequested}
-          onChange={(e) => setField("amountRequested", e.target.value)}
-        />
-        <input
-          placeholder="Annual Budget (USD) — e.g., 60000"
-          value={form.annualBudget}
-          onChange={(e) => setField("annualBudget", e.target.value)}
-        />
-        <input
-          placeholder="Project Title"
-          value={form.projectTitle}
-          onChange={(e) => setField("projectTitle", e.target.value)}
-        />
-        <input
-          placeholder="Timeline"
-          value={form.timeline}
-          onChange={(e) => setField("timeline", e.target.value)}
-        />
-        <input
-          placeholder="Audience / Who benefits?"
-          value={form.audience}
-          onChange={(e) => setField("audience", e.target.value)}
-        />
-        <textarea
-          placeholder="Notes (optional)"
-          value={form.notes}
-          onChange={(e) => setField("notes", e.target.value)}
-          rows={3}
-        />
-        <button onClick={handleRecommend}>See Recommendations</button>
-      </div>
+        <label>Organization
+          <input value={org} onChange={e=>setOrg(e.target.value)} placeholder="Your organization" />
+        </label>
 
-      {err && <p style={{ color: "crimson", marginTop: 12 }}>{err}</p>}
+        <label>Who are you?
+          <select value={who} onChange={e=>setWho(e.target.value)}>
+            <option value="">Select a category</option>
+            <option>Teacher (Classroom)</option>
+            <option>School / District</option>
+            <option>Church / Faith Org</option>
+            <option>501c3 Nonprofit</option>
+            <option>Small Business</option>
+            <option>City / Municipality</option>
+            <option>Other</option>
+          </select>
+        </label>
+
+        <label>Keywords (comma separated)
+          <input value={keywords} onChange={e=>setKeywords(e.target.value)} placeholder="e.g., STEM, robotics, classroom equipment, Title 1" />
+        </label>
+
+        <div className="grid2">
+          <label>Amount Requested (USD)
+            <input type="number" value={amountRequested} onChange={e=>setAmountRequested(e.target.value)} placeholder="e.g., 2500" />
+          </label>
+          <label>Annual Budget (USD)
+            <input type="number" value={annualBudget} onChange={e=>setAnnualBudget(e.target.value)} placeholder="e.g., 60000" />
+          </label>
+        </div>
+
+        <label>Project Title
+          <input value={projectTitle} onChange={e=>setProjectTitle(e.target.value)} placeholder="Short name of the project" />
+        </label>
+
+        <label>Timeline
+          <input value={timeline} onChange={e=>setTimeline(e.target.value)} placeholder="What do you need & when?" />
+        </label>
+
+        <label>Audience / Who benefits?
+          <input value={audience} onChange={e=>setAudience(e.target.value)} placeholder="Who is served (students, vets, etc.)" />
+        </label>
+
+        <label>Notes (optional)
+          <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Anything reviewers should know" rows={3} />
+        </label>
+
+        <button disabled={loading} onClick={handleSeeRecommendations}>See Recommendations</button>
+        {error && <p className="error">{error}</p>}
+      </section>
 
       {results.length > 0 && (
-        <>
-          <h3 style={{ marginTop: 24 }}>Recommended Opportunities</h3>
-          <ul style={{ paddingLeft: 18 }}>
-            {results.map((g) => (
-              <li key={g.id} style={{ marginBottom: 20 }}>
-                <div>
-                  <a href={g.program_url} target="_blank" rel="noreferrer">{g.title}</a>
-                  {" — "}
-                  <span>{g.amount_range}</span>
-                  {" — Deadline "}
-                  <span>{g.deadline}</span>
-                  {" — Fit "}
-                  <strong>{g.fit}</strong>
+        <section className="results">
+          <h3>Recommended Opportunities</h3>
+          <ul>
+            {results.map((row, i) => (
+              <li key={i} className="result">
+                <div className="row1">
+                  <a href={row.program_url} target="_blank" rel="noopener noreferrer">{row.title}</a>
+                  <span> — {row.amount} — Deadline {row.deadline} — Fit {row.fit}</span>
                 </div>
-                <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-                  <button onClick={() => handlePreview(g)}>Preview (Free)</button>
-                  <button disabled={paying === g.id} onClick={() => handlePay(g)}>
-                    {paying === g.id ? "Starting checkout…" : "Draft this (Pay)"}
+                {row.fit_notes && <div className="notes">Notes: {row.fit_notes}</div>}
+
+                <div className="actions">
+                  <button onClick={()=>handlePreview(row)}>Preview (Free)</button>
+                  <button onClick={()=>handlePay(row)}>
+                    Draft this (Pay {/* price shown in backend; button text is generic */})
                   </button>
                 </div>
-                {previews[g.id] && (
-                  <div style={{ marginTop: 10, background: "#f6f8fa", padding: 10, borderRadius: 6 }}>
-                    <div dangerouslySetInnerHTML={{ __html: previews[g.id].replace(/\n/g, "<br/>") }} />
+
+                {previews[row.title] && (
+                  <div className="preview">
+                    {previews[row.title]}
                   </div>
                 )}
               </li>
             ))}
           </ul>
-        </>
+        </section>
       )}
 
-      <footer style={{ marginTop: 32, fontSize: 12, opacity: 0.8 }}>
-        © 2025 GrantForgeUSA • This product uses AI to generate previews and draft language.
-        Review and edit before any submission.
+      <footer className="footer">
+        <p>© 2025 GrantForgeUSA</p>
+        <p className="muted">
+          This product uses AI to generate previews and draft language. Review and edit before any submission.
+        </p>
       </footer>
     </div>
   );
