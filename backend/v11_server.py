@@ -1,467 +1,377 @@
-# GrantforgeUSA — v11 backend (TEST MODE, end-to-end)
-# Health, intake + shortlist with money-match, AI preview (guarded), Stripe test checkout,
-# stable PDF generation and download endpoint, simple anti-fraud validations.
+// src/App.jsx — v11 end-to-end UI (vertical/mobile-first)
 
-import os
-import csv
-import json
-from datetime import datetime
-from typing import List, Dict, Any
+import { useEffect, useMemo, useState } from "react";
+import { API_BASE } from "./config";
 
-from flask import Flask, request, jsonify, send_file, abort
-from flask_cors import CORS
-from dotenv import load_dotenv
+const EP = {
+  shortlist: `${API_BASE}/questionnaire`,
+  preview: `${API_BASE}/preview`,
+  checkout: `${API_BASE}/create-checkout-session`,
+  session: `${API_BASE}/session`,
+  download: `${API_BASE}/download`,
+};
 
-import stripe
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-import pandas as pd
+const CATEGORIES = [
+  "Teacher (Classroom)",
+  "School / District",
+  "Small Nonprofit / Club",
+  "Medium Nonprofit",
+  "Large Nonprofit / Municipality",
+  "Church / Faith Org",
+  "Small Business",
+  "Other",
+];
 
-# ---------- Optional: AI + Firestore (guarded) ----------
-AI_OK = False
-FS_OK = False
-try:
-    import google.generativeai as genai
-    from google.cloud import firestore
-    AI_OK = True
-    FS_OK = True
-except Exception:
-    genai = None
-    firestore = None
-    AI_OK = False
-    FS_OK = False
+const label = (t) => <label className="block text-sm font-medium mb-1">{t}</label>;
 
-# ---------- Bootstrap env ----------
-load_dotenv()
-
-# Frontend base for redirects
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://grantforge-usav-11.vercel.app").rstrip("/")
-
-# Stripe (TEST)
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
-PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
-
-# Files/Storage
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-OUTPUT_DIR = os.getenv("OUTPUT_DIR", os.path.join(BASE_DIR, "out"))
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# Local DB file
-GRANTS_PATH = os.path.join(DATA_DIR, "grants.json")
-
-# Logging
-LOG_CSV = os.path.join(OUTPUT_DIR, "payments_log.csv")
-MAP_CSV = os.path.join(OUTPUT_DIR, "session_map.csv")  # session_id -> order_id -> filename
-
-# Pricing
-PRICES = {
-    "Teacher (Classroom)": 9.99,
-    "School / District": 49.99,         # falls under "Small" tier if they use size selector later
-    "Small Nonprofit / Club": 49.99,    # <= 500,000
-    "Medium Nonprofit": 99.99,          # 500,001 - 2,000,000
-    "Large Nonprofit / Municipality": 199.99,  # > 2,000,000
-    "Church / Faith Org": 49.99,
-    "Small Business": 49.99,
-    "Other": 49.99,
+function Field({ labelText, children }) {
+  return (
+    <div className="mb-4">
+      {label(labelText)}
+      {children}
+    </div>
+  );
 }
 
-# Anti-fraud / sanity caps (simple)
-REQUEST_CAP = {
-    "Teacher (Classroom)": 25000,
-    "School / District": 250000,
-    "Small Nonprofit / Club": 100000,
-    "Medium Nonprofit": 500000,
-    "Large Nonprofit / Municipality": 2000000,
-    "Church / Faith Org": 100000,
-    "Small Business": 100000,
-    "Other": 50000,
+function Input(props) {
+  return (
+    <input
+      {...props}
+      className={
+        "w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring " +
+        (props.className || "")
+      }
+    />
+  );
 }
 
-# ---------- App ----------
-app = Flask(__name__)
+function Textarea(props) {
+  return (
+    <textarea
+      {...props}
+      rows={3}
+      className={
+        "w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring " +
+        (props.className || "")
+      }
+    />
+  );
+}
 
-ALLOWED_ORIGINS = [
-    FRONTEND_URL,
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}}, supports_credentials=False)
+function Button({ children, ...rest }) {
+  return (
+    <button
+      {...rest}
+      className={
+        "inline-flex items-center justify-center rounded-md bg-sky-600 px-4 py-2 text-white text-sm font-semibold hover:bg-sky-700 disabled:opacity-60"
+      }
+    >
+      {children}
+    </button>
+  );
+}
 
-# ---------- Helpers ----------
-def cents(x: float) -> int:
-    return int(round(float(x) * 100))
+function FitBadge({ fit }) {
+  const tone =
+    fit === "High" ? "bg-emerald-100 text-emerald-800" :
+    fit === "Medium" ? "bg-amber-100 text-amber-800" :
+    "bg-gray-100 text-gray-700";
+  return (
+    <span className={`inline-block rounded px-2 py-0.5 text-xs font-semibold ${tone}`}>Fit {fit}</span>
+  );
+}
 
-def load_grants() -> List[Dict[str, Any]]:
-    if not os.path.exists(GRANTS_PATH):
-        return []
-    with open(GRANTS_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+function Header() {
+  return (
+    <header className="mx-auto max-w-3xl px-4 py-6">
+      <h1 className="text-3xl font-extrabold tracking-tight">GrantForgeUSA</h1>
+      <p className="text-sm text-gray-600 mt-1">
+        “Unless the Lord builds the house, the builders labor in vain.” — Psalm 127:1
+      </p>
+    </header>
+  );
+}
 
-def tokenize(s: str) -> List[str]:
-    return [w.strip().lower() for w in (s or "").replace("/", " ").replace(",", " ").split() if w.strip()]
+function Footer() {
+  const year = new Date().getFullYear();
+  return (
+    <footer className="mx-auto max-w-3xl px-4 py-10 text-xs text-gray-500">
+      <p>© {year} GrantForgeUSA</p>
+      <p className="mt-1">
+        This product uses AI to generate previews and draft language. Review and edit before any submission.
+      </p>
+    </footer>
+  );
+}
 
-def score_fit(grant: Dict[str, Any], form: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Money-match + category + keywords scoring -> High / Medium / Low
-    """
-    # Money match
-    req = float(form.get("amount_requested", 0) or 0)
-    min_amt = float(grant.get("min_amount") or 0)
-    max_amt = float(grant.get("max_amount") or 0)
-    money_ok = (min_amt <= req <= max_amt) if (min_amt and max_amt) else True
+function ThanksPage() {
+  const [status, setStatus] = useState({ loading: true, error: "", file: "", order_id: "" });
 
-    # Category / eligibility
-    who = (form.get("who") or "").lower()
-    eligible_types = [t.lower() for t in grant.get("eligible_types", [])]
-    cat_ok = True if not eligible_types else any(who.startswith(t) or t in who for t in eligible_types)
-
-    # Keyword overlap
-    form_kw = set(tokenize(form.get("keywords", "")))
-    grant_kw = set([t.lower() for t in grant.get("tags", [])])
-    kw_hits = len(form_kw.intersection(grant_kw))
-
-    # Geographic (very light)
-    geo = grant.get("geo_scope", "us").lower()
-    geo_ok = geo in ("us", "national", "united states")
-
-    # Score
-    score = 0
-    score += 2 if money_ok else 0
-    score += 2 if cat_ok else 0
-    score += 1 if kw_hits >= 1 else 0
-    score += 1 if kw_hits >= 3 else 0
-    score += 1 if geo_ok else 0
-
-    if score >= 5: fit = "High"
-    elif score >= 3: fit = "Medium"
-    else: fit = "Low"
-
-    return {
-        "fit": fit,
-        "score": score,
-        "money_ok": money_ok,
-        "cat_ok": cat_ok,
-        "kw_hits": kw_hits,
-        "geo_ok": geo_ok
+  useEffect(() => {
+    const u = new URL(window.location.href);
+    const sessionId = u.searchParams.get("session_id");
+    if (!sessionId) {
+      setStatus({ loading: false, error: "Missing session_id.", file: "", order_id: "" });
+      return;
     }
+    fetch(`${EP.session}?id=${encodeURIComponent(sessionId)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (!j.ok) throw new Error(j.error || "Unable to load session.");
+        setStatus({ loading: false, error: "", file: j.file || "", order_id: j.order_id || "" });
+      })
+      .catch((e) => setStatus({ loading: false, error: e.message, file: "", order_id: "" }));
+  }, []);
 
-def guard_amount(who: str, amount: float) -> Dict[str, Any]:
-    cap = REQUEST_CAP.get(who, REQUEST_CAP["Other"])
-    ok = amount <= cap
-    return {"ok": ok, "cap": cap}
+  const downloadHref = useMemo(() => {
+    if (status.file) return `${EP.download}/${encodeURIComponent(status.file)}`;
+    if (status.order_id) return `${EP.download}/${encodeURIComponent(status.order_id + ".pdf")}`;
+    return "";
+  }, [status]);
 
-def ensure_csv_headers(path: str, headers: List[str]):
-    exists = os.path.exists(path)
-    with open(path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        if not exists:
-            writer.writeheader()
+  return (
+    <>
+      <Header />
+      <main className="mx-auto max-w-3xl px-4">
+        <h2 className="text-xl font-semibold mb-4">Payment Success</h2>
+        {status.loading ? (
+          <p>Loading your draft…</p>
+        ) : status.error ? (
+          <p className="text-red-600">Error: {status.error}</p>
+        ) : downloadHref ? (
+          <p>
+            <a className="text-sky-700 underline font-semibold" href={downloadHref}>
+              Download Draft PDF
+            </a>
+          </p>
+        ) : (
+          <p>Your draft is being prepared. Please refresh this page in a moment.</p>
+        )}
+        <p className="mt-6 text-sm text-gray-600">
+          Keep this link for your records. You can request edits before submission.
+        </p>
+      </main>
+      <Footer />
+    </>
+  );
+}
 
-def log_payment_row(row: Dict[str, Any]):
-    headers = ["ts_utc","order_id","name","category","price","session_id","session_url","filename"]
-    ensure_csv_headers(LOG_CSV, headers)
-    with open(LOG_CSV, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writerow(row)
+export default function App() {
+  const isThanks = typeof window !== "undefined" && window.location.pathname === "/thanks";
+  if (isThanks) return <ThanksPage />;
 
-def map_session(session_id: str, order_id: str, filename: str):
-    headers = ["session_id","order_id","filename"]
-    ensure_csv_headers(MAP_CSV, headers)
-    with open(MAP_CSV, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writerow({"session_id": session_id, "order_id": order_id, "filename": filename})
+  const [form, setForm] = useState({
+    organization: "",
+    who: "",
+    keywords: "",
+    amount_requested: "",
+    annual_budget: "",
+    project_title: "",
+    timeline: "",
+    audience: "",
+    notes: "",
+  });
 
-def find_by_session(session_id: str) -> Dict[str, str]:
-    if not os.path.exists(MAP_CSV):
-        return {}
-    with open(MAP_CSV, "r", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            if row.get("session_id") == session_id:
-                return row
-    return {}
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [results, setResults] = useState([]); // shortlist grants
+  const [price, setPrice] = useState(null);
+  const [previews, setPreviews] = useState({}); // grant.title -> preview text
+  const [paying, setPaying] = useState("");
 
-def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
-    filename = f"{order_id}.pdf"
-    pdf_path = os.path.join(OUTPUT_DIR, filename)
-    c = canvas.Canvas(pdf_path, pagesize=letter)
+  const onChange = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-    # Header
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, 760, "GrantForgeUSA — Draft (TEST)")
-    c.setFont("Helvetica", 10)
-    c.drawString(50, 744, f"Order: {order_id}    Created: {datetime.utcnow().isoformat()}Z")
+  function toNumber(v) {
+    const n = parseFloat(String(v || "").replace(/[, ]/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  }
 
-    # Body
-    y = 720
-    def line(txt: str, step=14):
-        nonlocal y
-        c.drawString(50, y, txt[:1000])
-        y -= step
-
-    line("Intake Summary")
-    for k in ("organization","who","keywords","amount_requested","annual_budget","project_title","timeline","audience","notes"):
-        v = payload.get(k, "")
-        line(f" - {k.replace('_',' ').title()}: {v}")
-
-    line("")
-    line("Chosen Opportunity")
-    chosen = payload.get("chosen_grant", {})
-    line(f" - {chosen.get('title','(none)')}")
-    line(f" - Deadline: {chosen.get('deadline','')}")
-    line(f" - Amount range: ${chosen.get('min_amount','?')} — ${chosen.get('max_amount','?')}")
-    line(f" - Fit: {payload.get('fit','')}")
-    line("")
-
-    preview = (payload.get("preview_text") or "Preview text unavailable.")
-    line("Preview (auto-generated):")
-    # wrap preview into lines
-    for chunk in [preview[i:i+95] for i in range(0, len(preview), 95)]:
-        line(chunk)
-
-    c.showPage()
-    c.save()
-    return pdf_path
-
-def ai_preview(form: Dict[str, Any], grant: Dict[str, Any]) -> str:
-    text = f"""Organization: {form.get('organization')}
-Who: {form.get('who')}
-Project: {form.get('project_title')}
-Need/Timeline: {form.get('timeline')}
-Audience: {form.get('audience')}
-Amount Requested: {form.get('amount_requested')}
-Grant: {grant.get('title')} (deadline {grant.get('deadline')})
-
-Draft a short, plain-English summary (120–160 words) describing fit and what the funding will support.
-"""
-    if AI_OK and os.getenv("GOOGLE_API_KEY"):
-        try:
-            genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            resp = model.generate_content(text)
-            return (resp.text or "").strip()[:1200] or "Summary pending."
-        except Exception:
-            pass
-    # Fallback
-    return (
-        f"Your organization proposes a focused initiative aligned with {', '.join(tokenize(form.get('keywords','')))}. "
-        f"The project seeks {form.get('amount_requested')} to expand reach and deliver measurable outcomes. "
-        f"Requested funds will support materials, coordination, and participant-facing activities. "
-        f"This summary highlights eligibility and alignment to help you decide before purchasing a full draft."
-    )
-
-# ---------- Routes ----------
-@app.get("/")
-def home():
-    return "<h3>GrantForgeUSA v11 Backend</h3><p>Status: OK</p>"
-
-@app.get("/get/health")
-def get_health():
-    return jsonify(
-        ok=True,
-        frontend=FRONTEND_URL,
-        publishableKey=bool(PUBLISHABLE_KEY),
-        ai_ready=AI_OK and bool(os.getenv("GOOGLE_API_KEY")),
-        firestore_ready=FS_OK,
-        ts=datetime.utcnow().isoformat()+"Z"
-    )
-
-@app.post("/questionnaire")
-def questionnaire():
-    """
-    Intake -> shortlist recommendations with fit scoring.
-    """
-    try:
-        data = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify(ok=False, error="Invalid JSON"), 400
-
-    # Normalize
-    form = {
-        "organization": (data.get("organization") or "").strip(),
-        "who": (data.get("who") or "").strip(),
-        "keywords": (data.get("keywords") or "").strip(),
-        "amount_requested": float(data.get("amount_requested") or 0),
-        "annual_budget": float(data.get("annual_budget") or 0),
-        "project_title": (data.get("project_title") or "").strip(),
-        "timeline": (data.get("timeline") or "").strip(),
-        "audience": (data.get("audience") or "").strip(),
-        "notes": (data.get("notes") or "").strip(),
+  async function getShortlist() {
+    setLoading(true);
+    setError("");
+    setResults([]);
+    setPreviews({});
+    try {
+      const body = {
+        organization: form.organization,
+        who: form.who,
+        keywords: form.keywords,
+        amount_requested: toNumber(form.amount_requested),
+        annual_budget: toNumber(form.annual_budget),
+        project_title: form.project_title,
+        timeline: form.timeline,
+        audience: form.audience,
+        notes: form.notes,
+      };
+      const r = await fetch(EP.shortlist, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "Could not fetch recommendations.");
+      setResults(j.results || []);
+      setPrice(j.price ?? null);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
     }
+  }
 
-    # Anti-fraud cap
-    cap_check = guard_amount(form["who"], form["amount_requested"])
-    if not cap_check["ok"]:
-        return jsonify(
-            ok=False,
-            error=f"Requested amount exceeds category limit (${cap_check['cap']:,}). "
-                  f"Please adjust or choose the correct category."
-        ), 400
-
-    grants = load_grants()
-    if not grants:
-        return jsonify(ok=False, error="Grants database is empty."), 500
-
-    # Score and sort
-    scored = []
-    for g in grants:
-        s = score_fit(g, form)
-        row = {
-            "title": g.get("title"),
-            "program_url": g.get("program_url"),
-            "deadline": g.get("deadline"),
-            "min_amount": g.get("min_amount"),
-            "max_amount": g.get("max_amount"),
-            "fit": s["fit"],
-            "score": s["score"],
-            "money_ok": s["money_ok"],
-            "kw_hits": s["kw_hits"],
-        }
-        scored.append(row)
-
-    scored.sort(key=lambda r: (r["money_ok"], r["score"]), reverse=True)
-    top = scored[:3]
-
-    # Compute price
-    price = PRICES.get(form["who"], PRICES["Other"])
-
-    return jsonify(ok=True, price=price, results=top)
-
-@app.post("/preview")
-def preview():
-    """
-    Generate a free short preview for a chosen grant.
-    """
-    try:
-        data = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify(ok=False, error="Invalid JSON"), 400
-
-    form = data.get("form") or {}
-    grant = data.get("grant") or {}
-
-    txt = ai_preview(form, grant)
-    return jsonify(ok=True, preview=txt)
-
-@app.post("/create-checkout-session")
-def create_checkout_session():
-    if not (stripe.api_key and PUBLISHABLE_KEY):
-        return jsonify(ok=False, error="Stripe test keys not configured."), 500
-
-    try:
-        data = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify(ok=False, error="Invalid JSON"), 400
-
-    form = data.get("form") or {}
-    chosen = data.get("grant") or {}
-    who = (form.get("who") or "Other").strip()
-    amount_requested = float(form.get("amount_requested") or 0)
-
-    # Anti-fraud cap re-check
-    cap_check = guard_amount(who, amount_requested)
-    if not cap_check["ok"]:
-        return jsonify(ok=False, error="Amount exceeds allowed cap for this category."), 400
-
-    price = PRICES.get(who, PRICES["Other"])
-    order_id = datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
-
-    # Generate preview text used in PDF
-    preview_txt = ai_preview(form, chosen)
-
-    # Create PDF now (pre-payment) so the file is guaranteed
-    payload = {
-        "organization": form.get("organization"),
-        "who": who,
-        "keywords": form.get("keywords"),
-        "amount_requested": form.get("amount_requested"),
-        "annual_budget": form.get("annual_budget"),
-        "project_title": form.get("project_title"),
-        "timeline": form.get("timeline"),
-        "audience": form.get("audience"),
-        "notes": form.get("notes"),
-        "chosen_grant": chosen,
-        "fit": chosen.get("fit", ""),
-        "preview_text": preview_txt
+  async function getPreview(grant) {
+    const key = grant.title;
+    if (previews[key]) return; // already loaded
+    try {
+      const r = await fetch(EP.preview, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          form: {
+            ...form,
+            amount_requested: toNumber(form.amount_requested),
+            annual_budget: toNumber(form.annual_budget),
+          },
+          grant,
+        }),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "Preview failed.");
+      setPreviews((p) => ({ ...p, [key]: j.preview || "" }));
+    } catch (e) {
+      setPreviews((p) => ({ ...p, [key]: `Preview unavailable. (${e.message})` }));
     }
-    pdf_path = make_pdf(order_id, payload)
-    filename = os.path.basename(pdf_path)
+  }
 
-    try:
-        session = stripe.checkout.Session.create(
-            mode="payment",
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": f"Grant Draft — {who}"},
-                    "unit_amount": cents(price),
-                },
-                "quantity": 1,
-            }],
-            success_url=f"{FRONTEND_URL}/thanks?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{FRONTEND_URL}/",
-            metadata={
-                "order_id": order_id,
-                "filename": filename,
-                "category": who,
-                "organization": form.get("organization",""),
-            }
-        )
-    except Exception as e:
-        return jsonify(ok=False, error=str(e)), 400
+  async function payFor(grant) {
+    setPaying(grant.title);
+    setError("");
+    try {
+      const r = await fetch(EP.checkout, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          form: {
+            ...form,
+            amount_requested: toNumber(form.amount_requested),
+            annual_budget: toNumber(form.annual_budget),
+          },
+          grant,
+        }),
+      });
+      const j = await r.json();
+      if (!j.ok || !j.url) throw new Error(j.error || "Checkout failed.");
+      window.location.href = j.url; // Stripe redirect
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setPaying("");
+    }
+  }
 
-    # Log + map
-    try:
-        log_payment_row({
-            "ts_utc": datetime.utcnow().isoformat()+"Z",
-            "order_id": order_id,
-            "name": form.get("organization",""),
-            "category": who,
-            "price": price,
-            "session_id": session.id,
-            "session_url": session.url,
-            "filename": filename,
-        })
-        map_session(session.id, order_id, filename)
-    except Exception:
-        pass
+  return (
+    <>
+      <Header />
+      <main className="mx-auto max-w-3xl px-4">
+        <section className="bg-white rounded-2xl shadow p-5 border">
+          <h2 className="text-xl font-semibold mb-3">Tell us about your project (Free Intake)</h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Intake is free. You only pay if you want a full custom draft.
+          </p>
 
-    return jsonify(ok=True, url=session.url, sessionId=session.id, publishableKey=PUBLISHABLE_KEY)
+          <Field labelText="Organization">
+            <Input placeholder="Your organization" value={form.organization} onChange={onChange("organization")} />
+          </Field>
 
-@app.get("/download/<path:filename>")
-def download(filename: str):
-    """
-    Download a generated PDF by filename (e.g., ORD-...pdf).
-    """
-    safe = os.path.basename(filename)
-    path = os.path.join(OUTPUT_DIR, safe)
-    if not os.path.exists(path):
-        return jsonify(ok=False, error="not found"), 404
-    try:
-        return send_file(path, as_attachment=True, download_name=safe)
-    except Exception:
-        abort(500)
+          <Field labelText="Who are you?">
+            <select
+              value={form.who}
+              onChange={onChange("who")}
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            >
+              <option value="">Select a category</option>
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </Field>
 
-@app.get("/session")
-def session_status():
-    session_id = request.args.get("id")
-    if not session_id:
-        return jsonify(ok=False, error="missing id"), 400
-    try:
-        s = stripe.checkout.Session.retrieve(session_id)
-        row = find_by_session(session_id)
-        return jsonify(
-            ok=True,
-            status=s.status,
-            payment_status=s.payment_status,
-            file=row.get("filename"),
-            order_id=row.get("order_id")
-        )
-    except Exception as e:
-        return jsonify(ok=False, error=str(e)), 400
+          <Field labelText="Keywords (comma separated)">
+            <Input placeholder="e.g., STEM, food, youth" value={form.keywords} onChange={onChange("keywords")} />
+          </Field>
 
-# ---------- Dev server ----------
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=False)
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field labelText="Amount Requested (USD)">
+              <Input placeholder="e.g., 2500" value={form.amount_requested} onChange={onChange("amount_requested")} />
+            </Field>
+            <Field labelText="Annual Budget (USD)">
+              <Input placeholder="e.g., 60000" value={form.annual_budget} onChange={onChange("annual_budget")} />
+            </Field>
+          </div>
+
+          <Field labelText="Project Title">
+            <Input placeholder="Short name of the project" value={form.project_title} onChange={onChange("project_title")} />
+          </Field>
+
+          <Field labelText="Timeline">
+            <Input placeholder="What do you need & when?" value={form.timeline} onChange={onChange("timeline")} />
+          </Field>
+
+          <Field labelText="Audience / Who benefits?">
+            <Input placeholder="Who is served (students, vets, families…)" value={form.audience} onChange={onChange("audience")} />
+          </Field>
+
+          <Field labelText="Notes (optional)">
+            <Textarea placeholder="Anything else reviewers should know" value={form.notes} onChange={onChange("notes")} />
+          </Field>
+
+          <div className="mt-2">
+            <Button onClick={getShortlist} disabled={loading}>
+              {loading ? "Finding matches…" : "See Recommendations"}
+            </Button>
+          </div>
+
+          {error && <p className="mt-3 text-sm text-red-600">Error: {error}</p>}
+        </section>
+
+        {!!results.length && (
+          <section className="mt-8">
+            <h3 className="text-lg font-semibold mb-3">Recommended Opportunities</h3>
+            <ul className="space-y-6">
+              {results.map((g) => (
+                <li key={g.title} className="border rounded-xl p-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div>
+                      <a href={g.program_url || "#"} target="_blank" rel="noreferrer" className="font-semibold underline">
+                        {g.title}
+                      </a>
+                      <div className="text-sm text-gray-600 mt-1">
+                        ${g.min_amount?.toLocaleString?.() ?? g.min_amount} — ${g.max_amount?.toLocaleString?.() ?? g.max_amount}
+                        {"  "} • Deadline {g.deadline || "TBD"} {"  "} • <FitBadge fit={g.fit} />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        className="text-sky-700 underline text-sm"
+                        onClick={() => getPreview(g)}
+                      >
+                        Preview (Free)
+                      </button>
+                      <Button onClick={() => payFor(g)} disabled={paying === g.title}>
+                        {paying === g.title ? "Opening checkout…" : `Draft this (Pay ${price ? `$${price.toFixed(2)}` : ""})`}
+                      </Button>
+                    </div>
+                  </div>
+                  {previews[g.title] && (
+                    <p className="mt-3 text-sm text-gray-800">{previews[g.title]}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </main>
+      <Footer />
+    </>
+  );
+}
