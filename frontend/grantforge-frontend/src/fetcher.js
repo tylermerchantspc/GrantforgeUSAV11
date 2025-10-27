@@ -1,41 +1,34 @@
-// src/fetcher.js — v1.1
+// src/fetcher.js
+import { API_BASE } from "./config";
 
-import { ENDPOINTS } from "./config";
-
-export async function apiHealth() {
-  const r = await fetch(ENDPOINTS.health);
-  return r.json();
-}
-
-export async function findGrants(intake) {
-  const r = await fetch(ENDPOINTS.questionnaire, {
+export async function shortlist(payload) {
+  const r = await fetch(`${API_BASE}/questionnaire`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(intake),
+    body: JSON.stringify(payload),
   });
   return r.json();
 }
 
-export async function getPreview(grantId, intake) {
-  const r = await fetch(ENDPOINTS.preview, {
+export async function getPreview(payload) {
+  const r = await fetch(`${API_BASE}/preview`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ grant_id: grantId, intake }),
+    body: JSON.stringify(payload),
   });
   return r.json();
 }
 
-export async function startCheckout({ grantId, intake, category }) {
-  const r = await fetch(ENDPOINTS.checkout, {
+export async function createCheckoutSession(payload) {
+  const r = await fetch(`${API_BASE}/create-checkout-session`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ grant_id: grantId, intake, category }),
+    body: JSON.stringify(payload),
   });
   return r.json();
 }
 
-export async function finalizeDraft(sessionId) {
-  const url = `${ENDPOINTS.finalize}?session_id=${encodeURIComponent(sessionId)}`;
-  const r = await fetch(url);
-  return r.json();
+// Build the success-download URL from a Stripe session id:
+export function downloadUrlBySession(sessionId) {
+  return `${API_BASE}/download-by-session?session_id=${encodeURIComponent(sessionId)}`;
 }
