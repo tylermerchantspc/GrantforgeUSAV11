@@ -1,11 +1,48 @@
 // src/App.jsx
-import { useState } from "react";
-import { shortlist, getPreview, createCheckoutSession } from "./fetcher";
+import { useEffect, useState } from "react";
+import { shortlist, getPreview, createCheckoutSession, downloadUrlBySession } from "./fetcher";
 import { API_BASE } from "./config";
 import "./App.css";
 
-export default function App() {
-  // intake fields
+/* -------- Success Screen (inline) -------- */
+function ThanksScreen() {
+  const [url, setUrl] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const sid = p.get("session_id");
+    if (!sid) { setErr("Missing Stripe session id."); return; }
+    setUrl(downloadUrlBySession(sid));
+  }, []);
+
+  return (
+    <div className="wrap">
+      <header className="brand">
+        <h1>GrantForgeUSA</h1>
+        <p><em>"Unless the Lord builds the house, the builders labor in vain."</em> — Psalm 127:1</p>
+      </header>
+
+      <section className="card">
+        <h2>Payment Success</h2>
+        {url ? (
+          <p><a id="downloadLink" href={url}>Download Draft PDF</a></p>
+        ) : (
+          <p className="error">{err || "Preparing your file..."}</p>
+        )}
+        <p className="muted">Keep this link for your records. You can request edits before submission.</p>
+      </section>
+
+      <footer className="footer">
+        <p>© 2025 GrantForgeUSA</p>
+        <p className="muted">This product uses AI to generate previews and draft language. Review and edit before any submission.</p>
+      </footer>
+    </div>
+  );
+}
+
+/* -------- Intake App -------- */
+function IntakeApp() {
   const [org, setOrg] = useState("");
   const [who, setWho] = useState("");
   const [keywords, setKeywords] = useState("");
@@ -16,10 +53,9 @@ export default function App() {
   const [audience, setAudience] = useState("");
   const [notes, setNotes] = useState("");
 
-  // ui state
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState([]);   // grant rows
-  const [previews, setPreviews] = useState({}); // key: title -> text
+  const [results, setResults] = useState([]);
+  const [previews, setPreviews] = useState({});
   const [error, setError] = useState("");
 
   function intakePayload() {
@@ -32,7 +68,7 @@ export default function App() {
       projectTitle,
       timeline,
       audience,
-      notes
+      notes,
     };
   }
 
@@ -149,15 +185,11 @@ export default function App() {
 
                 <div className="actions">
                   <button onClick={()=>handlePreview(row)}>Preview (Free)</button>
-                  <button onClick={()=>handlePay(row)}>
-                    Draft this (Pay {/* price shown in backend; button text is generic */})
-                  </button>
+                  <button onClick={()=>handlePay(row)}>Draft this (Pay)</button>
                 </div>
 
                 {previews[row.title] && (
-                  <div className="preview">
-                    {previews[row.title]}
-                  </div>
+                  <div className="preview">{previews[row.title]}</div>
                 )}
               </li>
             ))}
@@ -173,4 +205,12 @@ export default function App() {
       </footer>
     </div>
   );
+}
+
+/* -------- Top-level: route switch by pathname -------- */
+export default function App() {
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/thanks")) {
+    return <ThanksScreen />;
+  }
+  return <IntakeApp />;
 }
