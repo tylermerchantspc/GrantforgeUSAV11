@@ -84,6 +84,12 @@ def fallback_grants_gov_url(title: str, tags: List[str]) -> str:
     q = "+".join(_norm_words(title)[:6] + tags[:4])
     return f"https://www.grants.gov/search-results?keywords={q}"
 
+# -------- A) URL normalizer (ensures a real HTTP URL) --------
+def _ensure_http_url(url: str, title: str, tags: List[str]) -> str:
+    if isinstance(url, str) and url.startswith(("http://", "https://")):
+        return url
+    return fallback_grants_gov_url(title or "", tags or [])
+
 def _pdf_header_mode_note() -> str:
     return "TEST MODE" if APP_MODE != "live" else "LIVE"
 
@@ -215,7 +221,9 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         s = score_grant(gr, category, kws, amount, state)
         if s["fit"] == "Low":
             continue
-        url = gr.get("program_url") or fallback_grants_gov_url(gr.get("title", ""), gr.get("tags", []))
+        # -------- B) Safe URL selection --------
+        url_raw = gr.get("program_url", "")
+        url = _ensure_http_url(url_raw, gr.get("title", ""), gr.get("tags", []))
         rows.append({
             "title": gr.get("title"),
             "program": gr.get("program") or gr.get("program_id") or gr.get("program_url") or "unknown",
@@ -311,7 +319,7 @@ def search():
     return questionnaire()
 
 
-# ---------------- draft stub (improved preview text) ----------------
+# ---------------- C) Contextual preview (uses selected grant) ----------------
 @app.post("/preview")
 def preview():
     try:
@@ -325,12 +333,35 @@ def preview():
     audience = (data.get("audience") or "").strip()
     timeline = (data.get("timeline") or "").strip()
     amount = _safe_float(data.get("amountRequested"))
+    grant = data.get("grant") or {}
+
+    g_title = grant.get("title") or "Selected opportunity"
+    g_deadline = grant.get("deadline") or "TBA"
+    g_requires_match = grant.get("requires_match_percent", 0) or 0
+    g_max = _safe_float(grant.get("max_amount"), 0)
+
+    align = []
+    if topic: align.append(f"focus on {topic}")
+    if audience: align.append(f"benefits {audience}")
+    if amount and g_max:
+        if amount > g_max:
+            align.append(f"note: your request ${amount:,.0f} exceeds program max ${g_max:,.0f}")
+        else:
+            align.append(f"request ${amount:,.0f} within program max ${g_max:,.0f}")
+
+    bullets = []
+    if g_requires_match:
+        bullets.append(f"Cost share: Requires {int(g_requires_match)}% match.")
+    bullets.append(f"Deadline: {g_deadline}.")
+    bullets_txt = " ".join(bullets)
 
     summary = (
-        f"{org} proposes “{title},” a focused initiative aligned with {topic or 'community needs'}. "
-        f"The project requests ${amount:,.0f} to support materials, coordination, and participant-facing activities. "
-        f"Primary beneficiaries: {audience or 'local community'}. Timeline: {timeline or 'TBA'}."
+        f"{org} proposes “{title},” aligned to {g_title} ({bullets_txt}) — "
+        f"{', '.join(align) or 'addresses community need'}. "
+        f"Timeline: {timeline or 'TBA'}. "
+        f"Draft will include problem statement, objectives, activities, budget uses, and evaluation."
     )
+
     return jsonify(ok=True, summary=summary)
 
 
@@ -529,58 +560,47 @@ def receipt():
     }
     return jsonify(result)
 
-# Reliable PDF fetch by Stripe session id
+# ---------------- D) Hardened download-by-session ----------------
 @app.get("/download-by-session")
 def download_by_session():
     session_id = request.args.get("session_id")
     if not session_id:
         return jsonify(ok=False, error="missing session_id"), 400
 
-    # try log first
+    def _safe_send(path, order_id_fallback="draft"):
+        try:
+            if not (path and os.path.exists(path)):
+                return jsonify(ok=False, error="PDF not found yet; try again in a moment."), 404
+            name = os.path.basename(path) or f"{order_id_fallback}.pdf"
+            return send_file(path, as_attachment=True, download_name=name, mimetype="application/pdf")
+        except Exception as e:
+            return jsonify(ok=False, error=f"send_file failed: {e}"), 400
+
+    # 1) try log
     row = find_log_by_session(session_id)
+    if row and row.get("pdf_path") and os.path.exists(row["pdf_path"]):
+        return _safe_send(row["pdf_path"], row.get("order_id", "draft"))
 
-    # if not found or missing metadata, look up Stripe and rebuild
-    if not row:
-        try:
-            s = stripe.checkout.Session.retrieve(session_id)
-        except Exception as e:
-            return jsonify(ok=False, error=f"Stripe lookup failed: {e}"), 400
+    # 2) rebuild from Stripe metadata
+    try:
+        s = stripe.checkout.Session.retrieve(session_id)
         md = s.metadata or {}
-        order_id = md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
-        payload = dict(md)
-        pdf_path = make_pdf(order_id, payload)
-        _append_payment_log_row({
-            "ts_utc": _now_utc(),
-            "order_id": order_id,
-            "org": md.get("org", ""),
-            "category": md.get("category", ""),
-            "amountRequested": float(md.get("amountRequested", 0) or 0),
-            "annualBudget": float(md.get("annualBudget", 0) or 0),
-            "grant_title": md.get("grant_title", ""),
-            "grant_program": md.get("grant_program", ""),
-            "session_id": session_id,
-            "session_url": "",
-            "price": float(md.get("price", 0) or 0),
-            "pdf_path": pdf_path,
-            "paid": s.get("payment_status") == "paid",
-        })
-        return send_file(pdf_path, as_attachment=True, download_name=f"{order_id}.pdf", mimetype="application/pdf")
+    except Exception as e:
+        return jsonify(ok=False, error=f"Stripe lookup failed: {e}"), 400
 
-    # row found: build if missing
-    pdf_path = row.get("pdf_path") or ""
-    if not (pdf_path and os.path.exists(pdf_path)):
-        # rebuild from Stripe metadata
-        try:
-            s = stripe.checkout.Session.retrieve(session_id)
-            md = s.metadata or {}
-        except Exception as e:
-            return jsonify(ok=False, error=f"Stripe lookup failed: {e}"), 400
-        order_id = row.get("order_id") or md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
-        payload = dict(md)
+    order_id = (row.get("order_id") if row else None) or md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
+    payload = dict(md)
+    try:
         pdf_path = make_pdf(order_id, payload)
-        _update_payment_log_by("session_id", session_id, {"pdf_path": pdf_path})
+    except Exception as e:
+        return jsonify(ok=False, error=f"PDF generation failed: {e}"), 400
 
-    return send_file(pdf_path, as_attachment=True, download_name=os.path.basename(pdf_path), mimetype="application/pdf")
+    _update_payment_log_by("session_id", session_id, {
+        "order_id": order_id,
+        "pdf_path": pdf_path,
+        "paid": s.get("payment_status") == "paid"
+    })
+    return _safe_send(pdf_path, order_id)
 
 
 # ------------- main (optional local run) -------------
