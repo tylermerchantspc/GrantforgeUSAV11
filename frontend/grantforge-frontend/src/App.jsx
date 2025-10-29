@@ -1,19 +1,108 @@
-// src/App.jsx
+// src/App.jsx — v1.2
 import { useEffect, useState } from "react";
-import { shortlist, getPreview, createCheckoutSession, downloadUrlBySession } from "./fetcher";
-import { API_BASE } from "./config";
+import {
+  shortlist,
+  getPreview,
+  createCheckoutSession,
+  downloadUrlBySession,
+  receiptBySession,
+  API_BASE,
+} from "./fetcher";
 import "./App.css";
+
+/* -------- US States + DC (for precise eligibility scoring) -------- */
+const STATES = [
+  { value: "", label: "Select a state (optional)" },
+  { value: "AL", label: "AL — Alabama" },
+  { value: "AK", label: "AK — Alaska" },
+  { value: "AZ", label: "AZ — Arizona" },
+  { value: "AR", label: "AR — Arkansas" },
+  { value: "CA", label: "CA — California" },
+  { value: "CO", label: "CO — Colorado" },
+  { value: "CT", label: "CT — Connecticut" },
+  { value: "DE", label: "DE — Delaware" },
+  { value: "DC", label: "DC — District of Columbia" },
+  { value: "FL", label: "FL — Florida" },
+  { value: "GA", label: "GA — Georgia" },
+  { value: "HI", label: "HI — Hawaii" },
+  { value: "ID", label: "ID — Idaho" },
+  { value: "IL", label: "IL — Illinois" },
+  { value: "IN", label: "IN — Indiana" },
+  { value: "IA", label: "IA — Iowa" },
+  { value: "KS", label: "KS — Kansas" },
+  { value: "KY", label: "KY — Kentucky" },
+  { value: "LA", label: "LA — Louisiana" },
+  { value: "ME", label: "ME — Maine" },
+  { value: "MD", label: "MD — Maryland" },
+  { value: "MA", label: "MA — Massachusetts" },
+  { value: "MI", label: "MI — Michigan" },
+  { value: "MN", label: "MN — Minnesota" },
+  { value: "MS", label: "MS — Mississippi" },
+  { value: "MO", label: "MO — Missouri" },
+  { value: "MT", label: "MT — Montana" },
+  { value: "NE", label: "NE — Nebraska" },
+  { value: "NV", label: "NV — Nevada" },
+  { value: "NH", label: "NH — New Hampshire" },
+  { value: "NJ", label: "NJ — New Jersey" },
+  { value: "NM", label: "NM — New Mexico" },
+  { value: "NY", label: "NY — New York" },
+  { value: "NC", label: "NC — North Carolina" },
+  { value: "ND", label: "ND — North Dakota" },
+  { value: "OH", label: "OH — Ohio" },
+  { value: "OK", label: "OK — Oklahoma" },
+  { value: "OR", label: "OR — Oregon" },
+  { value: "PA", label: "PA — Pennsylvania" },
+  { value: "RI", label: "RI — Rhode Island" },
+  { value: "SC", label: "SC — South Carolina" },
+  { value: "SD", label: "SD — South Dakota" },
+  { value: "TN", label: "TN — Tennessee" },
+  { value: "TX", label: "TX — Texas" },
+  { value: "UT", label: "UT — Utah" },
+  { value: "VT", label: "VT — Vermont" },
+  { value: "VA", label: "VA — Virginia" },
+  { value: "WA", label: "WA — Washington" },
+  { value: "WV", label: "WV — West Virginia" },
+  { value: "WI", label: "WI — Wisconsin" },
+  { value: "WY", label: "WY — Wyoming" },
+];
 
 /* -------- Success Screen (inline) -------- */
 function ThanksScreen() {
   const [url, setUrl] = useState("");
   const [err, setErr] = useState("");
+  const [paid, setPaid] = useState(false);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const sid = p.get("session_id");
     if (!sid) { setErr("Missing Stripe session id."); return; }
-    setUrl(downloadUrlBySession(sid));
+
+    let mounted = true;
+    let attempts = 0;
+
+    const poll = async () => {
+      try {
+        const r = await receiptBySession(sid);
+        if (r && r.ok) {
+          setPaid(!!r.paid);
+          if (r.download_path) {
+            setUrl(`${API_BASE}${r.download_path}`);
+            return;
+          }
+        }
+      } catch (_) { /* ignore & retry */ }
+
+      attempts += 1;
+      if (mounted && attempts < 15) {
+        setTimeout(poll, 2000); // ~30s max
+      } else if (mounted && !url) {
+        // Fallback to direct link even if receipt not ready
+        setUrl(downloadUrlBySession(sid));
+      }
+    };
+
+    poll();
+    return () => { mounted = false; };
   }, []);
 
   return (
@@ -26,7 +115,10 @@ function ThanksScreen() {
       <section className="card">
         <h2>Payment Success</h2>
         {url ? (
-          <p><a id="downloadLink" href={url}>Download Draft PDF</a></p>
+          <p>
+            <a id="downloadLink" href={url}>Download Draft PDF</a>
+            {!paid && <span className="muted" style={{ marginLeft: 8 }}>(finalizing… ok to click)</span>}
+          </p>
         ) : (
           <p className="error">{err || "Preparing your file..."}</p>
         )}
@@ -45,6 +137,7 @@ function ThanksScreen() {
 function IntakeApp() {
   const [org, setOrg] = useState("");
   const [who, setWho] = useState("");
+  const [stateUS, setStateUS] = useState(""); // dropdown (optional)
   const [keywords, setKeywords] = useState("");
   const [amountRequested, setAmountRequested] = useState("");
   const [annualBudget, setAnnualBudget] = useState("");
@@ -62,6 +155,7 @@ function IntakeApp() {
     return {
       organization: org,
       category: who,
+      state: stateUS, // used by backend scoring
       keywords,
       amountRequested: Number(amountRequested || 0),
       annualBudget: Number(annualBudget || 0),
@@ -135,6 +229,14 @@ function IntakeApp() {
             <option>Small Business</option>
             <option>City / Municipality</option>
             <option>Other</option>
+          </select>
+        </label>
+
+        <label>State (optional)
+          <select value={stateUS} onChange={e=>setStateUS(e.target.value)}>
+            {STATES.map(s => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
           </select>
         </label>
 
