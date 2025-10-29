@@ -179,10 +179,11 @@ function IntakeApp() {
     }
   }
 
+  // >>> PATCHED: send the selected grant to /preview so the summary is contextual
   async function handlePreview(row) {
     setError("");
     try {
-      const data = await getPreview(intakePayload());
+      const data = await getPreview({ ...intakePayload(), grant: row });
       if (!data.ok) throw new Error(data.error || "Preview failed.");
       setPreviews(p => ({ ...p, [row.title]: data.summary }));
     } catch (e) {
