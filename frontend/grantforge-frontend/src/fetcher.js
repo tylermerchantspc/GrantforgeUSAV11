@@ -1,34 +1,44 @@
-// src/fetcher.js
-import { API_BASE } from "./config";
+// src/fetcher.js — v1.2
+import { API_BASE, ENDPOINTS } from "./config";
 
-export async function shortlist(payload) {
-  const r = await fetch(`${API_BASE}/questionnaire`, {
+async function postJSON(url, body) {
+  const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body || {}),
   });
   return r.json();
+}
+
+async function getJSON(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+
+export async function shortlist(payload) {
+  // backend supports /questionnaire (and /search as alias)
+  return postJSON(ENDPOINTS.questionnaire, payload);
 }
 
 export async function getPreview(payload) {
-  const r = await fetch(`${API_BASE}/preview`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return r.json();
+  return postJSON(ENDPOINTS.preview, payload);
 }
 
 export async function createCheckoutSession(payload) {
-  const r = await fetch(`${API_BASE}/create-checkout-session`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return r.json();
+  return postJSON(ENDPOINTS.checkout, payload);
+}
+
+export async function receiptBySession(sessionId) {
+  return getJSON(`${ENDPOINTS.receipt}?session_id=${encodeURIComponent(sessionId)}`);
 }
 
 // Build the success-download URL from a Stripe session id:
 export function downloadUrlBySession(sessionId) {
-  return `${API_BASE}/download-by-session?session_id=${encodeURIComponent(sessionId)}`;
+  return `${ENDPOINTS.downloadBySession}?session_id=${encodeURIComponent(sessionId)}`;
 }
+
+export async function health() {
+  return getJSON(ENDPOINTS.health);
+}
+
+export { API_BASE };
