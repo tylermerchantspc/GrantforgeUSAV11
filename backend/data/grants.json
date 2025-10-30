@@ -1,7 +1,7 @@
 [
   {
     "title": "Community Support Grant",
-    "program_url": "https://example.org/csg",
+    "program_url": "https://www.grants.gov/search-results?keywords=Community+Support+Grant+community+capacity+services",
     "deadline": "2025-12-31",
     "min_amount": 10000,
     "max_amount": 50000,
@@ -12,7 +12,7 @@
   },
   {
     "title": "Capacity Mini-Grant",
-    "program_url": "https://example.org/cap-mini",
+    "program_url": "https://www.grants.gov/search-results?keywords=Capacity+Mini-Grant+capacity+equipment+planning",
     "deadline": "2025-11-30",
     "min_amount": 2500,
     "max_amount": 10000,
@@ -23,7 +23,7 @@
   },
   {
     "title": "STEM Classroom Boost",
-    "program_url": "https://example.org/stem-class",
+    "program_url": "https://www.grants.gov/search-results?keywords=STEM+Classroom+Boost+STEM+classroom+supplies+technology",
     "deadline": "2025-10-30",
     "min_amount": 1000,
     "max_amount": 15000,
@@ -34,7 +34,7 @@
   },
   {
     "title": "Small Business Innovation Fund",
-    "program_url": "https://example.org/sbif",
+    "program_url": "https://www.grants.gov/search-results?keywords=Small+Business+Innovation+Fund+innovation+equipment+training",
     "deadline": "2026-03-31",
     "min_amount": 15000,
     "max_amount": 75000,
@@ -45,7 +45,7 @@
   },
   {
     "title": "Municipal Safe Streets",
-    "program_url": "https://example.org/safe-streets",
+    "program_url": "https://www.grants.gov/search-results?keywords=Municipal+Safe+Streets+infrastructure+safety+transportation",
     "deadline": "2026-01-15",
     "min_amount": 20000,
     "max_amount": 200000,
@@ -56,7 +56,7 @@
   },
   {
     "title": "After-School Enrichment",
-    "program_url": "https://example.org/ase",
+    "program_url": "https://www.grants.gov/search-results?keywords=After-School+Enrichment+youth+education+after-school+tutoring",
     "deadline": "2025-12-01",
     "min_amount": 5000,
     "max_amount": 30000,
@@ -67,7 +67,7 @@
   },
   {
     "title": "Faith & Neighborhood Microgrant",
-    "program_url": "https://example.org/fnm",
+    "program_url": "https://www.grants.gov/search-results?keywords=Faith+%26+Neighborhood+Microgrant+outreach+food+shelter",
     "deadline": "2026-02-28",
     "min_amount": 1000,
     "max_amount": 7500,
@@ -78,7 +78,7 @@
   },
   {
     "title": "Career & Technical Education Tools",
-    "program_url": "https://example.org/cte-tools",
+    "program_url": "https://www.grants.gov/search-results?keywords=Career+%26+Technical+Education+Tools+CTE+equipment+workforce",
     "deadline": "2025-12-15",
     "min_amount": 10000,
     "max_amount": 60000,
