@@ -22,9 +22,9 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "https://grantforge-usav-11.vercel.app"
 FRONTEND_THANKS_URL = os.getenv("FRONTEND_THANKS_URL", f"{FRONTEND_URL}/thanks")
 
 # Stripe
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")          # sk_test_... / sk_live_...
-PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")    # pk_test_... / pk_live_...
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")  # whsec_...
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")            # sk_test_... / sk_live_...
+PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")      # pk_test_... / pk_live_...
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "") # whsec_...
 
 APP_MODE = os.getenv("APP_MODE", "test").lower()  # "test" | "live"
 
@@ -48,7 +48,6 @@ LARGE_PRICE = 199.99
 # ---------------- Flask app ----------------
 app = Flask(__name__)
 CORS(app, origins="*")
-
 
 # ---------------- helpers ----------------
 def cents(x: float) -> int:
@@ -81,12 +80,12 @@ def _deadline_ok(deadline_str: str) -> bool:
         return True  # if missing, don’t block
 
 def fallback_grants_gov_url(title: str, tags: List[str]) -> str:
-    q = "+".join(_norm_words(title)[:6] + tags[:4])
+    q = "+".join(_norm_words(title)[:6] + [t.lower() for t in (tags or [])][:4])
     return f"https://www.grants.gov/search-results?keywords={q}"
 
-# -------- A) URL normalizer (ensures a real HTTP URL) --------
+# -------- URL normalizer (force Grants.gov or fallback to its search) --------
 def _ensure_http_url(url: str, title: str, tags: List[str]) -> str:
-    if isinstance(url, str) and url.startswith(("http://", "https://")):
+    if isinstance(url, str) and url.startswith(("http://", "https://")) and "grants.gov" in url:
         return url
     return fallback_grants_gov_url(title or "", tags or [])
 
@@ -94,9 +93,7 @@ def _pdf_header_mode_note() -> str:
     return "TEST MODE" if APP_MODE != "live" else "LIVE"
 
 def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
-    """
-    Generates a simple, reliable PDF from the given payload.
-    """
+    """Generate a simple, reliable PDF from the given payload."""
     pdf_path = os.path.join(PDF_DIR, f"{order_id}.pdf")
     c = canvas.Canvas(pdf_path, pagesize=letter)
     c.setFont("Helvetica-Bold", 14)
@@ -111,17 +108,12 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
             c.showPage(); y = 770
             c.setFont("Helvetica", 10)
         line = f"{k}: {v}"
-        # wrap long lines roughly
         while len(line) > 110:
-            c.drawString(50, y, line[:110])
-            line = line[110:]
-            y -= 14
+            c.drawString(50, y, line[:110]); line = line[110:]; y -= 14
             if y < 60:
                 c.showPage(); y = 770; c.setFont("Helvetica", 10)
-        c.drawString(50, y, line)
-        y -= 14
+        c.drawString(50, y, line); y -= 14
 
-    # footer
     if y < 80:
         c.showPage(); y = 770; c.setFont("Helvetica", 10)
     c.setFont("Helvetica-Oblique", 9)
@@ -131,18 +123,14 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
 
 def price_for(category: str, annual_budget: float) -> float:
     c = (category or "").lower()
-    if c.startswith("teacher"):
-        return TEACHER_PRICE
-    if annual_budget <= 500_000:
-        return SMALL_PRICE
-    if annual_budget <= 2_000_000:
-        return MEDIUM_PRICE
+    if c.startswith("teacher"): return TEACHER_PRICE
+    if annual_budget <= 500_000: return SMALL_PRICE
+    if annual_budget <= 2_000_000: return MEDIUM_PRICE
     return LARGE_PRICE
 
 def fraud_check(category: str, amount: float) -> Dict[str, Any]:
     """Simple guardrails by category. Return {ok: bool, msg: str}."""
     c = (category or "").lower()
-
     limits = []
     if c.startswith("teacher"):
         limits.append(("Teachers are limited to $15,000 per draft.", amount <= 15_000))
@@ -154,58 +142,31 @@ def fraud_check(category: str, amount: float) -> Dict[str, Any]:
         limits.append(("Nonprofits are limited to $500,000 per draft.", amount <= 500_000))
     else:
         limits.append(("Other orgs are limited to $350,000 per draft.", amount <= 350_000))
-
     for msg, ok in limits:
-        if not ok:
-            return {"ok": False, "msg": msg}
-    if amount <= 0:
-        return {"ok": False, "msg": "Requested amount must be greater than 0."}
+        if not ok: return {"ok": False, "msg": msg}
+    if amount <= 0: return {"ok": False, "msg": "Requested amount must be greater than 0."}
     return {"ok": True, "msg": ""}
 
 def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float, state: str) -> Dict[str, Any]:
     score = 0
     fit_notes = []
-
-    # category eligibility
     elig = [e.lower() for e in gr.get("eligible_types", [])]
-    if any(t in (category or "").lower() for t in elig):
-        score += 2
-    else:
-        fit_notes.append("Category not an explicit match")
-
-    # amount window
+    if any(t in (category or "").lower() for t in elig): score += 2
+    else: fit_notes.append("Category not an explicit match")
     min_amt = _safe_float(gr.get("min_amount"), 0.0)
     max_amt = _safe_float(gr.get("max_amount"), 10**12)
-    if amount < min_amt:
-        fit_notes.append(f"Ask (${amount:,.0f}) is below minimum (${min_amt:,.0f})")
-    elif amount > max_amt:
-        fit_notes.append(f"Ask (${amount:,.0f}) exceeds maximum (${max_amt:,.0f})")
-    else:
-        score += 2
-
-    # keywords vs tags
+    if amount < min_amt: fit_notes.append(f"Ask (${amount:,.0f}) is below minimum (${min_amt:,.0f})")
+    elif amount > max_amt: fit_notes.append(f"Ask (${amount:,.0f}) exceeds maximum (${max_amt:,.0f})")
+    else: score += 2
     tags = [t.lower() for t in gr.get("tags", [])]
-    overlap = set(kws) & set(tags)
-    score += min(len(overlap), 3)  # up to +3
-
-    # deadline
-    if _deadline_ok(gr.get("deadline", "")):
-        score += 1
-    else:
-        fit_notes.append("Deadline has passed")
-
-    # state/region (if data present)
+    overlap = set(kws) & set(tags); score += min(len(overlap), 3)
+    if _deadline_ok(gr.get("deadline", "")): score += 1
+    else: fit_notes.append("Deadline has passed")
     states = [s.lower() for s in gr.get("eligible_states", [])]
-    if states and state and state.lower() not in states:
-        fit_notes.append("State may not be eligible")
-    elif states:
-        score += 1
-
-    # match % note
+    if states and state and state.lower() not in states: fit_notes.append("State may not be eligible")
+    elif states: score += 1
     req_match = int(gr.get("requires_match_percent", 0) or 0)
-    if req_match > 0:
-        fit_notes.append(f"Requires {req_match}% match")
-
+    if req_match > 0: fit_notes.append(f"Requires {req_match}% match")
     fit = "High" if score >= 6 else "Medium" if score >= 3 else "Low"
     return {"score": score, "fit": fit, "fit_notes": "; ".join(fit_notes)}
 
@@ -219,11 +180,8 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows = []
     for gr in grants:
         s = score_grant(gr, category, kws, amount, state)
-        if s["fit"] == "Low":
-            continue
-        # -------- B) Safe URL selection --------
-        url_raw = gr.get("program_url", "")
-        url = _ensure_http_url(url_raw, gr.get("title", ""), gr.get("tags", []))
+        if s["fit"] == "Low": continue
+        url = _ensure_http_url(gr.get("program_url", ""), gr.get("title", ""), gr.get("tags", []))
         rows.append({
             "title": gr.get("title"),
             "program": gr.get("program") or gr.get("program_id") or gr.get("program_url") or "unknown",
@@ -234,10 +192,10 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             "fit_notes": s["fit_notes"],
             "requires_match_percent": gr.get("requires_match_percent", 0),
             "max_amount": _safe_float(gr.get("max_amount"), 0),
+            "tags": gr.get("tags", []),
         })
-    # order: High first, then Medium; within, by max amount desc
     rows.sort(key=lambda r: (0 if r["fit"] == "High" else 1, -_safe_float(r.get("max_amount"), 0)))
-    return rows[:3]  # top 3 keeps UI tight
+    return rows[:3]
 
 def _append_payment_log_row(row: Dict[str, Any]) -> None:
     try:
@@ -252,8 +210,7 @@ def _append_payment_log_row(row: Dict[str, Any]) -> None:
 
 def _update_payment_log_by(key: str, value: str, patch: Dict[str, Any]) -> None:
     try:
-        if not os.path.exists(LOG_PATH):
-            return
+        if not os.path.exists(LOG_PATH): return
         df = pd.read_csv(LOG_PATH)
         ix = df.index[df[key] == value]
         if len(ix) > 0:
@@ -265,12 +222,10 @@ def _update_payment_log_by(key: str, value: str, patch: Dict[str, Any]) -> None:
 
 def find_log_by_session(session_id: str) -> Dict[str, Any]:
     try:
-        if not os.path.exists(LOG_PATH):
-            return {}
+        if not os.path.exists(LOG_PATH): return {}
         df = pd.read_csv(LOG_PATH)
         hit = df.loc[df["session_id"] == session_id]
-        if hit.empty:
-            return {}
+        if hit.empty: return {}
         return hit.iloc[0].to_dict()
     except Exception:
         return {}
@@ -282,13 +237,8 @@ def home():
 
 @app.get("/get/health")
 def get_health():
-    return jsonify(
-        ok=True,
-        mode=APP_MODE,
-        publishableKey=bool(PUBLISHABLE_KEY),
-        frontendThanksUrl=FRONTEND_THANKS_URL,
-        ts=_now_utc()
-    )
+    return jsonify(ok=True, mode=APP_MODE, publishableKey=bool(PUBLISHABLE_KEY),
+                   frontendThanksUrl=FRONTEND_THANKS_URL, ts=_now_utc())
 
 @app.get("/healthz")
 def healthz():
@@ -296,10 +246,7 @@ def healthz():
 
 @app.get("/get/offline")
 def get_offline():
-    # Always local-first; we treat external outages as non-blocking
-    # You can enhance this to attempt a grants.gov HEAD and return True on failure.
     return jsonify(ok=True, offline=False, ts=_now_utc())
-
 
 # ---------------- shortlist/search ----------------
 @app.post("/questionnaire")
@@ -308,18 +255,15 @@ def questionnaire():
         data = request.get_json(force=True) or {}
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
-
     org = (data.get("organization") or "Your Organization").strip()
     results = shortlist(data)
     return jsonify(ok=True, organization=org, results=results)
 
-# Alias for frontend convenience
 @app.post("/search")
 def search():
     return questionnaire()
 
-
-# ---------------- C) Contextual preview (uses selected grant) ----------------
+# ---------------- contextual preview ----------------
 @app.post("/preview")
 def preview():
     try:
@@ -333,37 +277,38 @@ def preview():
     audience = (data.get("audience") or "").strip()
     timeline = (data.get("timeline") or "").strip()
     amount = _safe_float(data.get("amountRequested"))
+
     grant = data.get("grant") or {}
+    if not grant:
+        short = shortlist(data)
+        if short: grant = short[0]
 
     g_title = grant.get("title") or "Selected opportunity"
     g_deadline = grant.get("deadline") or "TBA"
-    g_requires_match = grant.get("requires_match_percent", 0) or 0
+    g_match = int(grant.get("requires_match_percent", 0) or 0)
     g_max = _safe_float(grant.get("max_amount"), 0)
 
     align = []
     if topic: align.append(f"focus on {topic}")
     if audience: align.append(f"benefits {audience}")
-    if amount and g_max:
-        if amount > g_max:
-            align.append(f"note: your request ${amount:,.0f} exceeds program max ${g_max:,.0f}")
-        else:
+    if amount:
+        if g_max and amount > g_max:
+            align.append(f"request ${amount:,.0f} EXCEEDS program max ${g_max:,.0f}")
+        elif g_max:
             align.append(f"request ${amount:,.0f} within program max ${g_max:,.0f}")
+        else:
+            align.append(f"request ${amount:,.0f}")
 
-    bullets = []
-    if g_requires_match:
-        bullets.append(f"Cost share: Requires {int(g_requires_match)}% match.")
-    bullets.append(f"Deadline: {g_deadline}.")
-    bullets_txt = " ".join(bullets)
+    details = [f"Deadline: {g_deadline}."]
+    if g_match: details.append(f"Match required: {g_match}%.")
 
     summary = (
-        f"{org} proposes “{title},” aligned to {g_title} ({bullets_txt}) — "
-        f"{', '.join(align) or 'addresses community need'}. "
+        f"{org} proposes “{title},” aligned to **{g_title}** ({' '.join(details)}) — "
+        f"{', '.join(align) or 'addresses documented community need'}. "
         f"Timeline: {timeline or 'TBA'}. "
-        f"Draft will include problem statement, objectives, activities, budget uses, and evaluation."
+        f"Draft will include problem statement, objectives, activities, budget, and evaluation."
     )
-
     return jsonify(ok=True, summary=summary)
-
 
 # ---------------- Stripe Checkout ----------------
 @app.post("/create-checkout-session")
@@ -376,14 +321,12 @@ def create_checkout_session():
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
 
-    # intake
     org = (data.get("organization") or "Customer").strip()
     category = (data.get("category") or data.get("who") or "Other").strip()
     amount_req = _safe_float(data.get("amountRequested"))
     annual_budget = _safe_float(data.get("annualBudget"), 0)
-    grant = data.get("grant") or {}  # selected grant row
+    grant = data.get("grant") or {}
 
-    # fraud & amount sanity
     chk = fraud_check(category, amount_req)
     if not chk["ok"]:
         return jsonify(ok=False, error=chk["msg"]), 400
@@ -391,11 +334,9 @@ def create_checkout_session():
     if max_amt and amount_req > max_amt:
         return jsonify(ok=False, error=f"Requested ${amount_req:,.0f} exceeds this program’s maximum (${max_amt:,.0f})."), 400
 
-    # price
     price = price_for(category, annual_budget)
     product_name = f"Grant Draft — {category}"
 
-    # order id + metadata
     order_id = datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
     metadata = {
         "order_id": order_id,
@@ -411,7 +352,6 @@ def create_checkout_session():
         "app_mode": APP_MODE,
     }
 
-    # create checkout
     try:
         session = stripe.checkout.Session.create(
             mode="payment",
@@ -431,7 +371,6 @@ def create_checkout_session():
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 400
 
-    # write log (pre-payment)
     row = {
         "ts_utc": _now_utc(),
         "order_id": order_id,
@@ -444,12 +383,11 @@ def create_checkout_session():
         "session_id": session.id,
         "session_url": session.url,
         "price": price,
-        "pdf_path": "",  # updated by eager gen or webhook
+        "pdf_path": "",
         "paid": False,
     }
     _append_payment_log_row(row)
 
-    # eager PDF (best effort from metadata)
     try:
         pdf_path = make_pdf(order_id, metadata)
         _update_payment_log_by("order_id", order_id, {"pdf_path": pdf_path})
@@ -457,7 +395,6 @@ def create_checkout_session():
         pass
 
     return jsonify(ok=True, url=session.url, sessionId=session.id, publishableKey=PUBLISHABLE_KEY)
-
 
 # ---------------- Stripe Webhook (reliable post-payment) ----------------
 @app.post("/webhook/stripe")
@@ -472,14 +409,12 @@ def stripe_webhook():
     except Exception as e:
         return jsonify(ok=False, error=f"Signature verification failed: {e}"), 400
 
-    # We only care about a few events for now
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         session_id = session.get("id")
         md = session.get("metadata") or {}
         order_id = md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
 
-        # build reliable payload (prefer md)
         payload_for_pdf = dict(md)
         payload_for_pdf.update({
             "stripe_session_id": session_id,
@@ -489,18 +424,13 @@ def stripe_webhook():
             "mode": session.get("mode"),
         })
 
-        # generate/overwrite PDF
         try:
             pdf_path = make_pdf(order_id, payload_for_pdf)
-            _update_payment_log_by("session_id", session_id, {
-                "pdf_path": pdf_path,
-                "paid": True
-            })
+            _update_payment_log_by("session_id", session_id, {"pdf_path": pdf_path, "paid": True})
         except Exception:
             pass
 
     return jsonify(ok=True)
-
 
 # ---------------- Receipt / Download ----------------
 @app.get("/receipt")
@@ -509,10 +439,8 @@ def receipt():
     if not session_id:
         return jsonify(ok=False, error="missing session_id"), 400
 
-    # Try to serve from log
     row = find_log_by_session(session_id)
     if not row:
-        # attempt to pull Stripe data
         try:
             s = stripe.checkout.Session.retrieve(session_id)
             md = s.metadata or {}
@@ -527,7 +455,6 @@ def receipt():
             except Exception:
                 pdf_path = ""
 
-        # cache a minimal row to speed up future calls
         _append_payment_log_row({
             "ts_utc": _now_utc(),
             "order_id": order_id,
@@ -545,63 +472,57 @@ def receipt():
         })
         row = find_log_by_session(session_id)
 
-    # synthesize receipt
     dl_url = f"/download-by-session?session_id={session_id}"
-    result = {
+    return jsonify({
         "ok": True,
         "session_id": session_id,
         "order_id": row.get("order_id", ""),
-        "email": "",  # not collected in this flow; add later if needed
+        "email": "",
         "amount_total": row.get("price", 0),
         "paid": bool(row.get("paid", False)),
         "grant_title": row.get("grant_title", ""),
         "download_path": dl_url,
         "ts": _now_utc(),
-    }
-    return jsonify(result)
+    })
 
-# ---------------- D) Hardened download-by-session ----------------
+# ---------------- Hardened download-by-session (never 500) ----------------
 @app.get("/download-by-session")
 def download_by_session():
-    session_id = request.args.get("session_id")
-    if not session_id:
-        return jsonify(ok=False, error="missing session_id"), 400
+    try:
+        session_id = request.args.get("session_id")
+        if not session_id:
+            return jsonify(ok=False, error="missing session_id"), 400
 
-    def _safe_send(path, order_id_fallback="draft"):
+        def _safe_send(path, order_id_fallback="draft"):
+            try:
+                if not (path and os.path.exists(path)):
+                    return jsonify(ok=False, error="PDF not found yet; try again in a moment."), 404
+                name = os.path.basename(path) or f"{order_id_fallback}.pdf"
+                return send_file(path, as_attachment=True, download_name=name, mimetype="application/pdf")
+            except Exception as e:
+                return jsonify(ok=False, error=f"send_file failed: {e}"), 400
+
+        row = find_log_by_session(session_id)
+        if row and row.get("pdf_path") and os.path.exists(row["pdf_path"]):
+            return _safe_send(row["pdf_path"], row.get("order_id", "draft"))
+
         try:
-            if not (path and os.path.exists(path)):
-                return jsonify(ok=False, error="PDF not found yet; try again in a moment."), 404
-            name = os.path.basename(path) or f"{order_id_fallback}.pdf"
-            return send_file(path, as_attachment=True, download_name=name, mimetype="application/pdf")
+            s = stripe.checkout.Session.retrieve(session_id)
+            md = s.metadata or {}
         except Exception as e:
-            return jsonify(ok=False, error=f"send_file failed: {e}"), 400
+            return jsonify(ok=False, error=f"Stripe lookup failed: {e}"), 400
 
-    # 1) try log
-    row = find_log_by_session(session_id)
-    if row and row.get("pdf_path") and os.path.exists(row["pdf_path"]):
-        return _safe_send(row["pdf_path"], row.get("order_id", "draft"))
+        order_id = (row.get("order_id") if row else None) or md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
+        try:
+            pdf_path = make_pdf(order_id, dict(md))
+        except Exception as e:
+            return jsonify(ok=False, error=f"PDF generation failed: {e}"), 400
 
-    # 2) rebuild from Stripe metadata
-    try:
-        s = stripe.checkout.Session.retrieve(session_id)
-        md = s.metadata or {}
+        _update_payment_log_by("session_id", session_id, {"order_id": order_id, "pdf_path": pdf_path, "paid": s.get("payment_status") == "paid"})
+        return _safe_send(pdf_path, order_id)
+
     except Exception as e:
-        return jsonify(ok=False, error=f"Stripe lookup failed: {e}"), 400
-
-    order_id = (row.get("order_id") if row else None) or md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
-    payload = dict(md)
-    try:
-        pdf_path = make_pdf(order_id, payload)
-    except Exception as e:
-        return jsonify(ok=False, error=f"PDF generation failed: {e}"), 400
-
-    _update_payment_log_by("session_id", session_id, {
-        "order_id": order_id,
-        "pdf_path": pdf_path,
-        "paid": s.get("payment_status") == "paid"
-    })
-    return _safe_send(pdf_path, order_id)
-
+        return jsonify(ok=False, error=f"download route error: {e}"), 400
 
 # ------------- main (optional local run) -------------
 if __name__ == "__main__":
