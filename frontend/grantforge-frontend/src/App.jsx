@@ -10,63 +10,47 @@ import {
 } from "./fetcher";
 import "./App.css";
 
-/* -------- US States + DC (for precise eligibility scoring) -------- */
+/* -------- US States + DC -------- */
 const STATES = [
   { value: "", label: "Select a state (optional)" },
-  { value: "AL", label: "AL — Alabama" },
-  { value: "AK", label: "AK — Alaska" },
-  { value: "AZ", label: "AZ — Arizona" },
-  { value: "AR", label: "AR — Arkansas" },
-  { value: "CA", label: "CA — California" },
-  { value: "CO", label: "CO — Colorado" },
-  { value: "CT", label: "CT — Connecticut" },
-  { value: "DE", label: "DE — Delaware" },
-  { value: "DC", label: "DC — District of Columbia" },
-  { value: "FL", label: "FL — Florida" },
-  { value: "GA", label: "GA — Georgia" },
-  { value: "HI", label: "HI — Hawaii" },
-  { value: "ID", label: "ID — Idaho" },
-  { value: "IL", label: "IL — Illinois" },
-  { value: "IN", label: "IN — Indiana" },
-  { value: "IA", label: "IA — Iowa" },
-  { value: "KS", label: "KS — Kansas" },
-  { value: "KY", label: "KY — Kentucky" },
-  { value: "LA", label: "LA — Louisiana" },
-  { value: "ME", label: "ME — Maine" },
-  { value: "MD", label: "MD — Maryland" },
-  { value: "MA", label: "MA — Massachusetts" },
-  { value: "MI", label: "MI — Michigan" },
-  { value: "MN", label: "MN — Minnesota" },
-  { value: "MS", label: "MS — Mississippi" },
-  { value: "MO", label: "MO — Missouri" },
-  { value: "MT", label: "MT — Montana" },
-  { value: "NE", label: "NE — Nebraska" },
-  { value: "NV", label: "NV — Nevada" },
-  { value: "NH", label: "NH — New Hampshire" },
-  { value: "NJ", label: "NJ — New Jersey" },
-  { value: "NM", label: "NM — New Mexico" },
-  { value: "NY", label: "NY — New York" },
-  { value: "NC", label: "NC — North Carolina" },
-  { value: "ND", label: "ND — North Dakota" },
-  { value: "OH", label: "OH — Ohio" },
-  { value: "OK", label: "OK — Oklahoma" },
-  { value: "OR", label: "OR — Oregon" },
-  { value: "PA", label: "PA — Pennsylvania" },
-  { value: "RI", label: "RI — Rhode Island" },
-  { value: "SC", label: "SC — South Carolina" },
-  { value: "SD", label: "SD — South Dakota" },
-  { value: "TN", label: "TN — Tennessee" },
-  { value: "TX", label: "TX — Texas" },
-  { value: "UT", label: "UT — Utah" },
-  { value: "VT", label: "VT — Vermont" },
-  { value: "VA", label: "VA — Virginia" },
-  { value: "WA", label: "WA — Washington" },
-  { value: "WV", label: "WV — West Virginia" },
-  { value: "WI", label: "WI — Wisconsin" },
+  { value: "AL", label: "AL — Alabama" }, { value: "AK", label: "AK — Alaska" },
+  { value: "AZ", label: "AZ — Arizona" }, { value: "AR", label: "AR — Arkansas" },
+  { value: "CA", label: "CA — California" }, { value: "CO", label: "CO — Colorado" },
+  { value: "CT", label: "CT — Connecticut" }, { value: "DE", label: "DE — Delaware" },
+  { value: "DC", label: "DC — District of Columbia" }, { value: "FL", label: "FL — Florida" },
+  { value: "GA", label: "GA — Georgia" }, { value: "HI", label: "HI — Hawaii" },
+  { value: "ID", label: "ID — Idaho" }, { value: "IL", label: "IL — Illinois" },
+  { value: "IN", label: "IN — Indiana" }, { value: "IA", label: "IA — Iowa" },
+  { value: "KS", label: "KS — Kansas" }, { value: "KY", label: "KY — Kentucky" },
+  { value: "LA", label: "LA — Louisiana" }, { value: "ME", label: "ME — Maine" },
+  { value: "MD", label: "MD — Maryland" }, { value: "MA", label: "MA — Massachusetts" },
+  { value: "MI", label: "MI — Michigan" }, { value: "MN", label: "MN — Minnesota" },
+  { value: "MS", label: "MS — Mississippi" }, { value: "MO", label: "MO — Missouri" },
+  { value: "MT", label: "MT — Montana" }, { value: "NE", label: "NE — Nebraska" },
+  { value: "NV", label: "NV — Nevada" }, { value: "NH", label: "NH — New Hampshire" },
+  { value: "NJ", label: "NJ — New Jersey" }, { value: "NM", label: "NM — New Mexico" },
+  { value: "NY", label: "NY — New York" }, { value: "NC", label: "NC — North Carolina" },
+  { value: "ND", label: "ND — North Dakota" }, { value: "OH", label: "OH — Ohio" },
+  { value: "OK", label: "OK — Oklahoma" }, { value: "OR", label: "OR — Oregon" },
+  { value: "PA", label: "PA — Pennsylvania" }, { value: "RI", label: "RI — Rhode Island" },
+  { value: "SC", label: "SC — South Carolina" }, { value: "SD", label: "SD — South Dakota" },
+  { value: "TN", label: "TN — Tennessee" }, { value: "TX", label: "TX — Texas" },
+  { value: "UT", label: "UT — Utah" }, { value: "VT", label: "VT — Vermont" },
+  { value: "VA", label: "VA — Virginia" }, { value: "WA", label: "WA — Washington" },
+  { value: "WV", label: "WV — West Virginia" }, { value: "WI", label: "WI — Wisconsin" },
   { value: "WY", label: "WY — Wyoming" },
 ];
 
-/* -------- Success Screen (inline) -------- */
+/* -------- Safe link helper: always a Grants.gov URL -------- */
+function safeProgramUrl(u, title, tags = []) {
+  try {
+    if (typeof u === "string" && u.startsWith("http") && u.includes("grants.gov")) return u;
+  } catch {}
+  const q = encodeURIComponent([...(title || "").split(/\s+/).slice(0, 6), ...(tags || []).slice(0, 4)].join(" "));
+  return `https://www.grants.gov/search-results?keywords=${q}`;
+}
+
+/* -------- Success Screen -------- */
 function ThanksScreen() {
   const [url, setUrl] = useState("");
   const [err, setErr] = useState("");
@@ -78,7 +62,7 @@ function ThanksScreen() {
     if (!sid) { setErr("Missing Stripe session id."); return; }
 
     let mounted = true;
-    let attempts = 0;
+    let tries = 0;
 
     const poll = async () => {
       try {
@@ -90,15 +74,10 @@ function ThanksScreen() {
             return;
           }
         }
-      } catch (_) { /* ignore & retry */ }
-
-      attempts += 1;
-      if (mounted && attempts < 15) {
-        setTimeout(poll, 2000); // ~30s max
-      } else if (mounted && !url) {
-        // Fallback to direct link even if receipt not ready
-        setUrl(downloadUrlBySession(sid));
-      }
+      } catch {}
+      tries += 1;
+      if (mounted && tries < 15) setTimeout(poll, 2000);
+      else if (mounted && !url) setUrl(downloadUrlBySession(sid));
     };
 
     poll();
@@ -137,7 +116,7 @@ function ThanksScreen() {
 function IntakeApp() {
   const [org, setOrg] = useState("");
   const [who, setWho] = useState("");
-  const [stateUS, setStateUS] = useState(""); // dropdown (optional)
+  const [stateUS, setStateUS] = useState("");
   const [keywords, setKeywords] = useState("");
   const [amountRequested, setAmountRequested] = useState("");
   const [annualBudget, setAnnualBudget] = useState("");
@@ -155,7 +134,7 @@ function IntakeApp() {
     return {
       organization: org,
       category: who,
-      state: stateUS, // used by backend scoring
+      state: stateUS,
       keywords,
       amountRequested: Number(amountRequested || 0),
       annualBudget: Number(annualBudget || 0),
@@ -179,7 +158,6 @@ function IntakeApp() {
     }
   }
 
-  // >>> PATCHED: send the selected grant to /preview so the summary is contextual
   async function handlePreview(row) {
     setError("");
     try {
@@ -197,7 +175,7 @@ function IntakeApp() {
       const body = { ...intakePayload(), grant: row };
       const data = await createCheckoutSession(body);
       if (!data.ok) throw new Error(data.error || "Checkout failed.");
-      window.location.href = data.url; // Stripe hosted page
+      window.location.href = data.url;
     } catch (e) {
       setError(e.message);
     } finally {
@@ -235,9 +213,7 @@ function IntakeApp() {
 
         <label>State (optional)
           <select value={stateUS} onChange={e=>setStateUS(e.target.value)}>
-            {STATES.map(s => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
+            {STATES.map(s => (<option key={s.value} value={s.value}>{s.label}</option>))}
           </select>
         </label>
 
@@ -258,7 +234,7 @@ function IntakeApp() {
           <input value={projectTitle} onChange={e=>setProjectTitle(e.target.value)} placeholder="Short name of the project" />
         </label>
 
-        <label>Timeline
+        <label>What do you need & when?
           <input value={timeline} onChange={e=>setTimeline(e.target.value)} placeholder="What do you need & when?" />
         </label>
 
@@ -281,7 +257,9 @@ function IntakeApp() {
             {results.map((row, i) => (
               <li key={i} className="result">
                 <div className="row1">
-                  <a href={row.program_url} target="_blank" rel="noopener noreferrer">{row.title}</a>
+                  <a href={safeProgramUrl(row.program_url, row.title, row.tags)} target="_blank" rel="noopener noreferrer">
+                    {row.title}
+                  </a>
                   <span> — {row.amount} — Deadline {row.deadline} — Fit {row.fit}</span>
                 </div>
                 {row.fit_notes && <div className="notes">Notes: {row.fit_notes}</div>}
@@ -310,7 +288,7 @@ function IntakeApp() {
   );
 }
 
-/* -------- Top-level: route switch by pathname -------- */
+/* -------- Router switch -------- */
 export default function App() {
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/thanks")) {
     return <ThanksScreen />;
