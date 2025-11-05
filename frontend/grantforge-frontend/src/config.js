@@ -4,11 +4,11 @@ export const API_BASE =
 
 export const ENDPOINTS = {
   health: `${API_BASE}/get/health`,
-  questionnaire: `${API_BASE}/questionnaire`,          // backend alias /search also available
+  questionnaire: `${API_BASE}/questionnaire`,
   preview: `${API_BASE}/preview`,
   checkout: `${API_BASE}/create-checkout-session`,
-  receipt: `${API_BASE}/receipt`,                      // NEW
-  downloadBySession: `${API_BASE}/download-by-session` // NEW
+  receipt: `${API_BASE}/receipt`,
+  downloadBySession: `${API_BASE}/download-by-session`,
 };
 
 export default { API_BASE, ENDPOINTS };
