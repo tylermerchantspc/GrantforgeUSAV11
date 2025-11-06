@@ -1,6 +1,7 @@
-// src/config.js — v1.2
+// src/config.js — v1.2.1 (aligned with backend v11)
 export const API_BASE =
-  import.meta.env.VITE_API_BASE || "https://grantforgeusa-v11-backend.onrender.com";
+  import.meta.env.VITE_API_BASE ||
+  "https://grantforgeusa-v11-backend.onrender.com";
 
 export const ENDPOINTS = {
   health: `${API_BASE}/get/health`,
