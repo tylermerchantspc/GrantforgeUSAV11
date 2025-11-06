@@ -1,4 +1,4 @@
-// src/App.jsx — v1.2
+// src/App.jsx — v1.2.1 (aligned with backend fallbacks & contextual previews)
 import { useEffect, useState } from "react";
 import {
   shortlist,
@@ -41,13 +41,15 @@ const STATES = [
   { value: "WY", label: "WY — Wyoming" },
 ];
 
-/* -------- Safe link helper: always a Grants.gov URL -------- */
+/* -------- Safe link helper: always a Grants.gov URL (matches backend /search-grants) -------- */
 function safeProgramUrl(u, title, tags = []) {
   try {
     if (typeof u === "string" && u.startsWith("http") && u.includes("grants.gov")) return u;
   } catch {}
-  const q = encodeURIComponent([...(title || "").split(/\s+/).slice(0, 6), ...(tags || []).slice(0, 4)].join(" "));
-  return `https://www.grants.gov/search-results?keywords=${q}`;
+  const q = encodeURIComponent(
+    [...(title || "").split(/\s+/).slice(0, 6), ...(tags || []).slice(0, 4)].join(" ")
+  );
+  return `https://www.grants.gov/search-grants?keywords=${q}`;
 }
 
 /* -------- Success Screen -------- */
@@ -142,6 +144,7 @@ function IntakeApp() {
       timeline,
       audience,
       notes,
+      includeExpired: false, // align with backend default (hide expired)
     };
   }
 
@@ -161,6 +164,7 @@ function IntakeApp() {
   async function handlePreview(row) {
     setError("");
     try {
+      // Pass the selected grant for contextual preview
       const data = await getPreview({ ...intakePayload(), grant: row });
       if (!data.ok) throw new Error(data.error || "Preview failed.");
       setPreviews(p => ({ ...p, [row.title]: data.summary }));
@@ -239,7 +243,7 @@ function IntakeApp() {
         </label>
 
         <label>Audience / Who benefits?
-          <input value={audience} onChange={e=>setAudience(e.target.value)} placeholder="Who is served (students, vets, etc.)" />
+            <input value={audience} onChange={e=>setAudience(e.target.value)} placeholder="Who is served (students, vets, etc.)" />
         </label>
 
         <label>Notes (optional)
@@ -257,11 +261,16 @@ function IntakeApp() {
             {results.map((row, i) => (
               <li key={i} className="result">
                 <div className="row1">
-                  <a href={safeProgramUrl(row.program_url, row.title, row.tags)} target="_blank" rel="noopener noreferrer">
+                  <a
+                    href={safeProgramUrl(row.program_url, row.title, row.tags)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     {row.title}
                   </a>
                   <span> — {row.amount} — Deadline {row.deadline} — Fit {row.fit}</span>
                 </div>
+
                 {row.fit_notes && <div className="notes">Notes: {row.fit_notes}</div>}
 
                 <div className="actions">
