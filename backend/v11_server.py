@@ -28,7 +28,8 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "") # whsec_...
 
 APP_MODE = os.getenv("APP_MODE", "test").lower()  # "test" | "live"
 
-OUTPUT_DIR = os.getenv("OUTPUT_DIR", "v11_payment_data")
+# ===== Writable storage (Render dynos can only write to /tmp) =====
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/tmp/grantforge_v11")
 PDF_DIR = os.path.join(OUTPUT_DIR, "pdfs")
 LOG_PATH = os.path.join(OUTPUT_DIR, "payments_log.csv")
 
@@ -79,9 +80,18 @@ def _deadline_ok(deadline_str: str) -> bool:
     except Exception:
         return True  # if missing, don’t block
 
+# NEW: simple expired check (used to hide expired grants by default)
+def _is_expired(deadline_str: str) -> bool:
+    try:
+        d = date.fromisoformat(deadline_str)
+        return d < date.today()
+    except Exception:
+        return False
+
 def fallback_grants_gov_url(title: str, tags: List[str]) -> str:
+    # Updated to resilient Grants.gov search endpoint
     q = "+".join(_norm_words(title)[:6] + [t.lower() for t in (tags or [])][:4])
-    return f"https://www.grants.gov/search-results?keywords={q}"
+    return f"https://www.grants.gov/search-grants?keywords={q}"
 
 # -------- URL normalizer (force Grants.gov or fallback to its search) --------
 def _ensure_http_url(url: str, title: str, tags: List[str]) -> str:
@@ -94,6 +104,7 @@ def _pdf_header_mode_note() -> str:
 
 def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
     """Generate a simple, reliable PDF from the given payload."""
+    os.makedirs(PDF_DIR, exist_ok=True)  # ensure exists at write time
     pdf_path = os.path.join(PDF_DIR, f"{order_id}.pdf")
     c = canvas.Canvas(pdf_path, pagesize=letter)
     c.setFont("Helvetica-Bold", 14)
@@ -176,9 +187,15 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     amount = _safe_float(payload.get("amountRequested"))
     kws = _norm_words(payload.get("keywords", ""))
     state = (payload.get("state") or "").strip()
+    # NEW: allow override; default hides expired
+    include_expired = bool(payload.get("includeExpired"))
 
     rows = []
     for gr in grants:
+        # NEW: hide expired unless explicitly requested
+        if not include_expired and _is_expired(gr.get("deadline", "")):
+            continue
+
         s = score_grant(gr, category, kws, amount, state)
         if s["fit"] == "Low": continue
         url = _ensure_http_url(gr.get("program_url", ""), gr.get("title", ""), gr.get("tags", []))
