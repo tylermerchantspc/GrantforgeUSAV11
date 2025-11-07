@@ -1,4 +1,4 @@
-// src/App.jsx — v1.2.1 (aligned with backend fallbacks & contextual previews)
+// src/App.jsx — v1.3 (final, backend v11 aligned)
 import { useEffect, useState } from "react";
 import {
   shortlist,
@@ -7,6 +7,7 @@ import {
   downloadUrlBySession,
   receiptBySession,
   API_BASE,
+  debugPaths,
 } from "./fetcher";
 import "./App.css";
 
@@ -126,11 +127,21 @@ function IntakeApp() {
   const [timeline, setTimeline] = useState("");
   const [audience, setAudience] = useState("");
   const [notes, setNotes] = useState("");
+  const [includeExpired, setIncludeExpired] = useState(false); // NEW toggle
 
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
   const [previews, setPreviews] = useState({});
   const [error, setError] = useState("");
+
+  // Optional: surface backend debug info inline (safe no-op if route not present)
+  const [debugInfo, setDebugInfo] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const d = await debugPaths().catch(() => null);
+      if (d && d.ok) setDebugInfo(d);
+    })();
+  }, []);
 
   function intakePayload() {
     return {
@@ -144,7 +155,7 @@ function IntakeApp() {
       timeline,
       audience,
       notes,
-      includeExpired: false, // align with backend default (hide expired)
+      includeExpired, // honors backend flag
     };
   }
 
@@ -164,7 +175,6 @@ function IntakeApp() {
   async function handlePreview(row) {
     setError("");
     try {
-      // Pass the selected grant for contextual preview
       const data = await getPreview({ ...intakePayload(), grant: row });
       if (!data.ok) throw new Error(data.error || "Preview failed.");
       setPreviews(p => ({ ...p, [row.title]: data.summary }));
@@ -243,11 +253,21 @@ function IntakeApp() {
         </label>
 
         <label>Audience / Who benefits?
-            <input value={audience} onChange={e=>setAudience(e.target.value)} placeholder="Who is served (students, vets, etc.)" />
+          <input value={audience} onChange={e=>setAudience(e.target.value)} placeholder="Who is served (students, vets, etc.)" />
         </label>
 
         <label>Notes (optional)
           <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Anything reviewers should know" rows={3} />
+        </label>
+
+        {/* NEW: Show expired toggle */}
+        <label className="inline">
+          <input
+            type="checkbox"
+            checked={includeExpired}
+            onChange={(e)=>setIncludeExpired(e.target.checked)}
+          />
+          <span style={{ marginLeft: 8 }}>Include expired opportunities</span>
         </label>
 
         <button disabled={loading} onClick={handleSeeRecommendations}>See Recommendations</button>
@@ -271,6 +291,12 @@ function IntakeApp() {
                   <span> — {row.amount} — Deadline {row.deadline} — Fit {row.fit}</span>
                 </div>
 
+                {Array.isArray(row.tags) && row.tags.length > 0 && (
+                  <div className="muted" style={{ marginTop: 4 }}>
+                    Tags: {row.tags.join(", ")}
+                  </div>
+                )}
+
                 {row.fit_notes && <div className="notes">Notes: {row.fit_notes}</div>}
 
                 <div className="actions">
@@ -284,6 +310,16 @@ function IntakeApp() {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {/* Optional diagnostics (only shows if backend exposes /get/debug-paths) */}
+      {debugInfo && (
+        <section className="card" style={{ marginTop: 16 }}>
+          <h3>Diagnostics</h3>
+          <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            {JSON.stringify(debugInfo, null, 2)}
+          </pre>
         </section>
       )}
 
