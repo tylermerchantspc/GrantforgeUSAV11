@@ -1,90 +1,115 @@
 [
   {
-    "title": "Community Support Grant",
-    "program_url": "https://www.grants.gov/search-results?keywords=Community+Support+Grant+community+capacity+services",
+    "title": "Community Development Block Grant (CDBG)",
+    "program_url": "https://www.grants.gov/search-grants?keywords=Community+Development+Block+Grant",
     "deadline": "2025-12-31",
-    "min_amount": 10000,
-    "max_amount": 50000,
-    "eligible_types": ["501c3", "church", "community", "municipality", "school"],
-    "tags": ["community", "capacity", "services"],
-    "requires_match_percent": 0,
-    "geo_scope": "US"
+    "min_amount": 5000,
+    "max_amount": 500000,
+    "eligible_types": [
+      "municipality", "city", "county", "local government", "town", "tribal government",
+      "501c3", "nonprofit", "non-profit organization", "community development corporation"
+    ],
+    "eligible_states": ["AL","AR","GA","KY","LA","MS","NC","SC","TN","VA","WV"],
+    "tags": ["community", "infrastructure", "housing", "revitalization"],
+    "requires_match_percent": 10,
+    "geo_scope": "South"
   },
   {
-    "title": "Capacity Mini-Grant",
-    "program_url": "https://www.grants.gov/search-results?keywords=Capacity+Mini-Grant+capacity+equipment+planning",
+    "title": "STEM Classroom Innovation Grant",
+    "program_url": "https://www.grants.gov/search-grants?keywords=STEM+Classroom+Innovation+Grant",
     "deadline": "2025-11-30",
-    "min_amount": 2500,
-    "max_amount": 10000,
-    "eligible_types": ["501c3", "community", "school"],
-    "tags": ["capacity", "equipment", "planning"],
-    "requires_match_percent": 0,
-    "geo_scope": "US"
-  },
-  {
-    "title": "STEM Classroom Boost",
-    "program_url": "https://www.grants.gov/search-results?keywords=STEM+Classroom+Boost+STEM+classroom+supplies+technology",
-    "deadline": "2025-10-30",
     "min_amount": 1000,
     "max_amount": 15000,
-    "eligible_types": ["teacher", "school"],
-    "tags": ["STEM", "classroom", "supplies", "technology"],
+    "eligible_types": [
+      "teacher", "educator", "classroom", "school", "district", "k12", "public school", "charter school"
+    ],
+    "eligible_states": ["WA","OR","CA","NV","ID","MT","WY","UT","AK","HI"],
+    "tags": ["STEM", "education", "classroom", "technology", "innovation"],
     "requires_match_percent": 0,
-    "geo_scope": "US"
+    "geo_scope": "Pacific"
   },
   {
-    "title": "Small Business Innovation Fund",
-    "program_url": "https://www.grants.gov/search-results?keywords=Small+Business+Innovation+Fund+innovation+equipment+training",
+    "title": "Faith & Neighborhood Outreach Microgrant",
+    "program_url": "https://www.grants.gov/search-grants?keywords=Faith+and+Neighborhood+Outreach+Microgrant",
+    "deadline": "2026-02-28",
+    "min_amount": 1000,
+    "max_amount": 10000,
+    "eligible_types": [
+      "church", "faith organization", "faith-based nonprofit", "ministry", "501c3", "community outreach group"
+    ],
+    "eligible_states": ["VA","MD","DC","PA","DE","WV","NC"],
+    "tags": ["outreach", "food", "shelter", "community", "assistance"],
+    "requires_match_percent": 0,
+    "geo_scope": "Mid-Atlantic"
+  },
+  {
+    "title": "After-School Enrichment Program Grant",
+    "program_url": "https://www.grants.gov/search-grants?keywords=After-School+Enrichment+Program+Grant",
+    "deadline": "2025-12-15",
+    "min_amount": 5000,
+    "max_amount": 30000,
+    "eligible_types": [
+      "501c3", "nonprofit", "school", "district", "community organization", "youth center"
+    ],
+    "eligible_states": ["MN","IA","WI","IL","MI","ND","SD","NE","KS","MO"],
+    "tags": ["education", "youth", "after-school", "tutoring", "mentorship"],
+    "requires_match_percent": 0,
+    "geo_scope": "Midwest"
+  },
+  {
+    "title": "Small Business Innovation Research (SBIR) Starter Fund",
+    "program_url": "https://www.grants.gov/search-grants?keywords=Small+Business+Innovation+Research",
     "deadline": "2026-03-31",
     "min_amount": 15000,
     "max_amount": 75000,
-    "eligible_types": ["small business", "small_business"],
-    "tags": ["innovation", "equipment", "training"],
+    "eligible_types": [
+      "small business", "startup", "entrepreneur", "for-profit", "smb", "microenterprise"
+    ],
+    "eligible_states": ["TX","OK","NM","CO","AZ","NV","UT"],
+    "tags": ["innovation", "technology", "entrepreneurship", "prototype"],
     "requires_match_percent": 10,
-    "geo_scope": "US"
+    "geo_scope": "Southwest"
   },
   {
-    "title": "Municipal Safe Streets",
-    "program_url": "https://www.grants.gov/search-results?keywords=Municipal+Safe+Streets+infrastructure+safety+transportation",
+    "title": "Safe Streets & Community Infrastructure Grant",
+    "program_url": "https://www.grants.gov/search-grants?keywords=Safe+Streets+and+Community+Infrastructure+Grant",
     "deadline": "2026-01-15",
-    "min_amount": 20000,
+    "min_amount": 25000,
     "max_amount": 200000,
-    "eligible_types": ["municipality", "city"],
-    "tags": ["infrastructure", "safety", "transportation"],
+    "eligible_types": [
+      "municipality", "city", "county", "transportation department", "public works"
+    ],
+    "eligible_states": ["NY","NJ","PA","CT","MA","RI","NH","VT","ME"],
+    "tags": ["transportation", "safety", "public works", "infrastructure"],
     "requires_match_percent": 20,
-    "geo_scope": "US"
+    "geo_scope": "Northeast"
   },
   {
-    "title": "After-School Enrichment",
-    "program_url": "https://www.grants.gov/search-results?keywords=After-School+Enrichment+youth+education+after-school+tutoring",
-    "deadline": "2025-12-01",
-    "min_amount": 5000,
-    "max_amount": 30000,
-    "eligible_types": ["501c3", "school", "community"],
-    "tags": ["youth", "education", "after-school", "tutoring"],
-    "requires_match_percent": 0,
-    "geo_scope": "US"
-  },
-  {
-    "title": "Faith & Neighborhood Microgrant",
-    "program_url": "https://www.grants.gov/search-results?keywords=Faith+%26+Neighborhood+Microgrant+outreach+food+shelter",
-    "deadline": "2026-02-28",
-    "min_amount": 1000,
-    "max_amount": 7500,
-    "eligible_types": ["church", "community"],
-    "tags": ["outreach", "food", "shelter"],
-    "requires_match_percent": 0,
-    "geo_scope": "US"
-  },
-  {
-    "title": "Career & Technical Education Tools",
-    "program_url": "https://www.grants.gov/search-results?keywords=Career+%26+Technical+Education+Tools+CTE+equipment+workforce",
-    "deadline": "2025-12-15",
+    "title": "Career & Technical Education Tools Grant",
+    "program_url": "https://www.grants.gov/search-grants?keywords=Career+and+Technical+Education+Tools+Grant",
+    "deadline": "2025-12-20",
     "min_amount": 10000,
     "max_amount": 60000,
-    "eligible_types": ["school"],
-    "tags": ["CTE", "equipment", "workforce"],
+    "eligible_types": [
+      "school", "district", "k12", "technical center", "vocational school", "CTE program"
+    ],
+    "eligible_states": ["OH","IN","IL","WI","MN","IA","MI","MO"],
+    "tags": ["CTE", "equipment", "workforce", "career training"],
     "requires_match_percent": 5,
-    "geo_scope": "US"
+    "geo_scope": "Great Lakes"
+  },
+  {
+    "title": "Rural Broadband Expansion Grant",
+    "program_url": "https://www.grants.gov/search-grants?keywords=Rural+Broadband+Expansion+Grant",
+    "deadline": "2026-04-30",
+    "min_amount": 20000,
+    "max_amount": 250000,
+    "eligible_types": [
+      "municipality", "county", "cooperative", "utility provider", "telecom company", "nonprofit"
+    ],
+    "eligible_states": ["MT","ND","SD","WY","NE","KS","CO","ID","NM"],
+    "tags": ["rural", "internet", "infrastructure", "technology"],
+    "requires_match_percent": 15,
+    "geo_scope": "West"
   }
 ]
