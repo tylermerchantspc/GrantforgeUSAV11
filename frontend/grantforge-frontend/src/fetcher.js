@@ -1,4 +1,4 @@
-// src/fetcher.js — v1.2.1 (hardened fetch, aligned with backend v11)
+// src/fetcher.js — v1.3 (final, backend v11 aligned)
 import { ENDPOINTS, API_BASE } from "./config";
 
 /* ---------- small fetch helper with timeout & clearer errors ---------- */
@@ -8,7 +8,6 @@ async function safeFetch(url, options = {}, { timeoutMs = 20000 } = {}) {
 
   try {
     const res = await fetch(url, { ...options, signal: controller.signal });
-    // Let backend return {ok:false, error: "..."} with 200; only throw on HTTP errors
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(
@@ -59,6 +58,16 @@ export async function receiptBySession(sessionId) {
 
 export function downloadUrlBySession(sessionId) {
   return `${ENDPOINTS.downloadBySession}?session_id=${encodeURIComponent(sessionId)}`;
+}
+
+/* ---------- NEW: backend diagnostics ---------- */
+export async function debugPaths() {
+  try {
+    const res = await fetch(ENDPOINTS.debugPaths, { method: "GET" });
+    return res.json();
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
 }
 
 export { API_BASE };
