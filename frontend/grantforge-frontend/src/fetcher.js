@@ -1,7 +1,7 @@
-// src/fetcher.js — v1.3 (final, backend v11 aligned)
+// src/fetcher.js — v1.3.1 (production locked, backend v11 aligned)
 import { ENDPOINTS, API_BASE } from "./config";
 
-/* ---------- small fetch helper with timeout & clearer errors ---------- */
+/* ---------- safe fetch helper with timeout & clearer errors ---------- */
 async function safeFetch(url, options = {}, { timeoutMs = 20000 } = {}) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -16,7 +16,9 @@ async function safeFetch(url, options = {}, { timeoutMs = 20000 } = {}) {
         }`
       );
     }
-    return res.json();
+    return await res.json();
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
   } finally {
     clearTimeout(id);
   }
@@ -24,7 +26,6 @@ async function safeFetch(url, options = {}, { timeoutMs = 20000 } = {}) {
 
 /* ---------- API wrappers ---------- */
 export async function shortlist(payload) {
-  // Hide expired by default unless caller explicitly opts in
   const body = JSON.stringify({ includeExpired: false, ...(payload || {}) });
   return safeFetch(ENDPOINTS.questionnaire, {
     method: "POST",
@@ -60,14 +61,15 @@ export function downloadUrlBySession(sessionId) {
   return `${ENDPOINTS.downloadBySession}?session_id=${encodeURIComponent(sessionId)}`;
 }
 
-/* ---------- NEW: backend diagnostics ---------- */
+/* ---------- Backend diagnostics (optional) ---------- */
 export async function debugPaths() {
   try {
     const res = await fetch(ENDPOINTS.debugPaths, { method: "GET" });
-    return res.json();
+    return await res.json();
   } catch (e) {
     return { ok: false, error: String(e) };
   }
 }
 
+Object.freeze(ENDPOINTS);
 export { API_BASE };
