@@ -1,4 +1,4 @@
-// src/App.jsx — v1.3 (final, backend v11 aligned)
+// src/App.jsx — v1.3.1 (streamlined, no debug/toggles; backend v11 aligned)
 import { useEffect, useState } from "react";
 import {
   shortlist,
@@ -7,7 +7,6 @@ import {
   downloadUrlBySession,
   receiptBySession,
   API_BASE,
-  debugPaths,
 } from "./fetcher";
 import "./App.css";
 
@@ -42,7 +41,7 @@ const STATES = [
   { value: "WY", label: "WY — Wyoming" },
 ];
 
-/* -------- Safe link helper: always a Grants.gov URL (matches backend /search-grants) -------- */
+/* -------- Safe link helper: always a Grants.gov URL -------- */
 function safeProgramUrl(u, title, tags = []) {
   try {
     if (typeof u === "string" && u.startsWith("http") && u.includes("grants.gov")) return u;
@@ -127,21 +126,11 @@ function IntakeApp() {
   const [timeline, setTimeline] = useState("");
   const [audience, setAudience] = useState("");
   const [notes, setNotes] = useState("");
-  const [includeExpired, setIncludeExpired] = useState(false); // NEW toggle
 
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
   const [previews, setPreviews] = useState({});
   const [error, setError] = useState("");
-
-  // Optional: surface backend debug info inline (safe no-op if route not present)
-  const [debugInfo, setDebugInfo] = useState(null);
-  useEffect(() => {
-    (async () => {
-      const d = await debugPaths().catch(() => null);
-      if (d && d.ok) setDebugInfo(d);
-    })();
-  }, []);
 
   function intakePayload() {
     return {
@@ -155,7 +144,8 @@ function IntakeApp() {
       timeline,
       audience,
       notes,
-      includeExpired, // honors backend flag
+      // expired opportunities are always hidden in this streamlined flow
+      includeExpired: false,
     };
   }
 
@@ -260,16 +250,6 @@ function IntakeApp() {
           <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Anything reviewers should know" rows={3} />
         </label>
 
-        {/* NEW: Show expired toggle */}
-        <label className="inline">
-          <input
-            type="checkbox"
-            checked={includeExpired}
-            onChange={(e)=>setIncludeExpired(e.target.checked)}
-          />
-          <span style={{ marginLeft: 8 }}>Include expired opportunities</span>
-        </label>
-
         <button disabled={loading} onClick={handleSeeRecommendations}>See Recommendations</button>
         {error && <p className="error">{error}</p>}
       </section>
@@ -300,8 +280,8 @@ function IntakeApp() {
                 {row.fit_notes && <div className="notes">Notes: {row.fit_notes}</div>}
 
                 <div className="actions">
-                  <button onClick={()=>handlePreview(row)}>Preview (Free)</button>
-                  <button onClick={()=>handlePay(row)}>Draft this (Pay)</button>
+                  <button onClick={()=>handlePreview(row)} disabled={loading}>Preview (Free)</button>
+                  <button onClick={()=>handlePay(row)} disabled={loading}>Draft this (Pay)</button>
                 </div>
 
                 {previews[row.title] && (
@@ -310,16 +290,6 @@ function IntakeApp() {
               </li>
             ))}
           </ul>
-        </section>
-      )}
-
-      {/* Optional diagnostics (only shows if backend exposes /get/debug-paths) */}
-      {debugInfo && (
-        <section className="card" style={{ marginTop: 16 }}>
-          <h3>Diagnostics</h3>
-          <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-            {JSON.stringify(debugInfo, null, 2)}
-          </pre>
         </section>
       )}
 
