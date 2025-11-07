@@ -38,7 +38,7 @@
     "deadline": "2026-03-31",
     "min_amount": 15000,
     "max_amount": 75000,
-    "eligible_types": ["small_business"],
+    "eligible_types": ["small business", "small_business"],
     "tags": ["innovation", "equipment", "training"],
     "requires_match_percent": 10,
     "geo_scope": "US"
@@ -49,7 +49,7 @@
     "deadline": "2026-01-15",
     "min_amount": 20000,
     "max_amount": 200000,
-    "eligible_types": ["municipality"],
+    "eligible_types": ["municipality", "city"],
     "tags": ["infrastructure", "safety", "transportation"],
     "requires_match_percent": 20,
     "geo_scope": "US"
