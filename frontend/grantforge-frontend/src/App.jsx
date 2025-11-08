@@ -1,4 +1,4 @@
-// src/App.jsx — v1.3.1 (streamlined, no debug/toggles; backend v11 aligned)
+// src/App.jsx — v1.3.2 (streamlined; grants.gov-only links; backend v11 aligned)
 import { useEffect, useState } from "react";
 import {
   shortlist,
@@ -131,6 +131,7 @@ function IntakeApp() {
   const [results, setResults] = useState([]);
   const [previews, setPreviews] = useState({});
   const [error, setError] = useState("");
+  const [previewBusy, setPreviewBusy] = useState({}); // per-row preview spinner/lock
 
   function intakePayload() {
     return {
@@ -144,8 +145,7 @@ function IntakeApp() {
       timeline,
       audience,
       notes,
-      // expired opportunities are always hidden in this streamlined flow
-      includeExpired: false,
+      includeExpired: false, // streamlined: never show expired
     };
   }
 
@@ -164,12 +164,15 @@ function IntakeApp() {
 
   async function handlePreview(row) {
     setError("");
+    setPreviewBusy(p => ({ ...p, [row.title]: true }));
     try {
       const data = await getPreview({ ...intakePayload(), grant: row });
       if (!data.ok) throw new Error(data.error || "Preview failed.");
       setPreviews(p => ({ ...p, [row.title]: data.summary }));
     } catch (e) {
       setError(e.message);
+    } finally {
+      setPreviewBusy(p => ({ ...p, [row.title]: false }));
     }
   }
 
@@ -250,7 +253,9 @@ function IntakeApp() {
           <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Anything reviewers should know" rows={3} />
         </label>
 
-        <button disabled={loading} onClick={handleSeeRecommendations}>See Recommendations</button>
+        <button disabled={loading} onClick={handleSeeRecommendations}>
+          {loading ? "Finding matches..." : "See Recommendations"}
+        </button>
         {error && <p className="error">{error}</p>}
       </section>
 
@@ -280,7 +285,13 @@ function IntakeApp() {
                 {row.fit_notes && <div className="notes">Notes: {row.fit_notes}</div>}
 
                 <div className="actions">
-                  <button onClick={()=>handlePreview(row)} disabled={loading}>Preview (Free)</button>
+                  <button
+                    onClick={()=>handlePreview(row)}
+                    disabled={!!previewBusy[row.title] || loading}
+                    aria-busy={!!previewBusy[row.title]}
+                  >
+                    {previewBusy[row.title] ? "Building preview…" : "Preview (Free)"}
+                  </button>
                   <button onClick={()=>handlePay(row)} disabled={loading}>Draft this (Pay)</button>
                 </div>
 
