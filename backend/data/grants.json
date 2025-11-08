@@ -83,8 +83,6 @@
     "requires_match_percent": 0,
     "geo_scope": "Mid-Atlantic"
   },
-
-  /* ----------------- TEACHER (US-wide, easy match) ----------------- */
   {
     "title": "Classroom Supplies & Mini-Equipment (Teacher Microgrant)",
     "program_url": "https://www.grants.gov/search-grants?keywords=teacher%20classroom%20supplies%20mini%20grant",
