@@ -50,14 +50,25 @@ LARGE_PRICE = 199.99
 
 # ---------------- Flask app ----------------
 app = Flask(__name__)
-CORS(app, origins="*")
+
+# Env-configurable CORS:
+# - default: "*" (easy testing)
+# - set CORS_ORIGINS="https://yourlivefrontend.com" for locked-down live
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
+if CORS_ORIGINS == "*":
+    CORS(app, origins="*")
+else:
+    CORS(app, origins=[o.strip() for o in CORS_ORIGINS.split(",") if o.strip()])
+
 
 # ---------------- helpers ----------------
 def cents(x: float) -> int:
     return int(round(float(x) * 100))
 
+
 def _now_utc() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
 
 def _read_json(path: str) -> Any:
     try:
@@ -66,14 +77,17 @@ def _read_json(path: str) -> Any:
     except Exception:
         return []
 
+
 def _norm_words(s: str) -> List[str]:
     return [w.strip().lower() for w in (s or "").replace(",", " ").split() if w.strip()]
+
 
 def _safe_float(x, default=0.0) -> float:
     try:
         return float(x)
     except Exception:
         return default
+
 
 def _deadline_ok(deadline_str: str) -> bool:
     try:
@@ -82,6 +96,7 @@ def _deadline_ok(deadline_str: str) -> bool:
     except Exception:
         return True  # if missing, don’t block
 
+
 def _is_expired(deadline_str: str) -> bool:
     try:
         d = date.fromisoformat(deadline_str)
@@ -89,10 +104,12 @@ def _is_expired(deadline_str: str) -> bool:
     except Exception:
         return False
 
+
 def fallback_grants_gov_url(title: str, tags: List[str]) -> str:
     # robust Grants.gov search endpoint
     q = "+".join(_norm_words(title)[:6] + [t.lower() for t in (tags or [])][:4])
     return f"https://www.grants.gov/search-grants?keywords={q}"
+
 
 # -------- URL normalizer (force Grants.gov or fallback to its search) --------
 def _ensure_http_url(url: str, title: str, tags: List[str]) -> str:
@@ -100,8 +117,10 @@ def _ensure_http_url(url: str, title: str, tags: List[str]) -> str:
         return url
     return fallback_grants_gov_url(title or "", tags or [])
 
+
 def _pdf_header_mode_note() -> str:
     return "TEST MODE" if APP_MODE != "live" else "LIVE"
+
 
 def _wrap_draw_line(c: canvas.Canvas, text: str, start_x: int, y: int, width_chars: int = 110) -> int:
     """
@@ -114,6 +133,7 @@ def _wrap_draw_line(c: canvas.Canvas, text: str, start_x: int, y: int, width_cha
         y -= 14
     c.drawString(start_x, y, line)
     return y - 14
+
 
 def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
     """Generate a simple, reliable PDF from the given payload."""
@@ -151,6 +171,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
     c.save()
     return pdf_path
 
+
 def price_for(category: str, annual_budget: float) -> float:
     c = (category or "").lower()
     if c.startswith("teacher"):
@@ -160,6 +181,7 @@ def price_for(category: str, annual_budget: float) -> float:
     if annual_budget <= 2_000_000:
         return MEDIUM_PRICE
     return LARGE_PRICE
+
 
 def fraud_check(category: str, amount: float) -> Dict[str, Any]:
     """Simple guardrails by category. Return {ok: bool, msg: str}."""
@@ -185,6 +207,7 @@ def fraud_check(category: str, amount: float) -> Dict[str, Any]:
         return {"ok": False, "msg": "Requested amount must be greater than 0."}
 
     return {"ok": True, "msg": ""}
+
 
 def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float, state: str) -> Dict[str, Any]:
     score = 0
@@ -233,6 +256,7 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
     fit = "High" if score >= 6 else "Medium" if score >= 3 else "Low"
     return {"score": score, "fit": fit, "fit_notes": "; ".join(fit_notes)}
 
+
 def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     grants = _read_json(GRANTS_PATH) or []
     category = payload.get("category") or payload.get("who") or ""
@@ -268,6 +292,7 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows.sort(key=lambda r: (0 if r["fit"] == "High" else 1, -_safe_float(r.get("max_amount"), 0)))
     return rows[:3]  # top 3 for concise UI
 
+
 def _append_payment_log_row(row: Dict[str, Any]) -> None:
     try:
         if os.path.exists(LOG_PATH):
@@ -278,6 +303,7 @@ def _append_payment_log_row(row: Dict[str, Any]) -> None:
         df.to_csv(LOG_PATH, index=False)
     except Exception:
         pass
+
 
 def _update_payment_log_by(key: str, value: str, patch: Dict[str, Any]) -> None:
     try:
@@ -292,6 +318,7 @@ def _update_payment_log_by(key: str, value: str, patch: Dict[str, Any]) -> None:
     except Exception:
         pass
 
+
 def find_log_by_session(session_id: str) -> Dict[str, Any]:
     try:
         if not os.path.exists(LOG_PATH):
@@ -304,10 +331,12 @@ def find_log_by_session(session_id: str) -> Dict[str, Any]:
     except Exception:
         return {}
 
+
 # ---------------- health ----------------
 @app.get("/")
 def home():
     return "<h2>GrantforgeUSA v11 Backend</h2><p>Status: OK</p>"
+
 
 @app.get("/get/health")
 def get_health():
@@ -319,14 +348,17 @@ def get_health():
         ts=_now_utc()
     )
 
+
 @app.get("/healthz")
 def healthz():
     return jsonify(ok=True, ts=_now_utc())
+
 
 @app.get("/get/offline")
 def get_offline():
     # Always local-first; we treat external outages as non-blocking
     return jsonify(ok=True, offline=False, ts=_now_utc())
+
 
 @app.get("/get/debug-paths")
 def get_debug_paths():
@@ -355,6 +387,7 @@ def get_debug_paths():
     except Exception as e:
         return jsonify(ok=False, error=str(e), ts=_now_utc()), 500
 
+
 # ---------------- shortlist/search ----------------
 @app.post("/questionnaire")
 def questionnaire():
@@ -367,9 +400,11 @@ def questionnaire():
     results = shortlist(data)
     return jsonify(ok=True, organization=org, results=results)
 
+
 @app.post("/search")
 def search():
     return questionnaire()
+
 
 # -------- contextual preview helpers --------
 def _mk_objectives_from_keywords(kws: List[str], audience: str) -> List[str]:
@@ -397,6 +432,7 @@ def _mk_objectives_from_keywords(kws: List[str], audience: str) -> List[str]:
             out.append(f"Implement targeted activities related to “{k}” with measurable outputs.")
     return out
 
+
 def _mk_evaluation_lines(audience: str) -> List[str]:
     who = audience or "participants"
     return [
@@ -404,6 +440,7 @@ def _mk_evaluation_lines(audience: str) -> List[str]:
         "Use short pre/post assessments tied to lesson objectives.",
         "Collect teacher/facilitator observations and student feedback.",
     ]
+
 
 # ---------------- contextual preview ----------------
 @app.post("/preview")
@@ -474,6 +511,7 @@ def preview():
 
     summary = "\n".join(parts)
     return jsonify(ok=True, summary=summary)
+
 
 # ---------------- Stripe Checkout ----------------
 @app.post("/create-checkout-session")
@@ -566,6 +604,7 @@ def create_checkout_session():
 
     return jsonify(ok=True, url=session.url, sessionId=session.id, publishableKey=PUBLISHABLE_KEY)
 
+
 # ---------------- Stripe Webhook (reliable post-payment) ----------------
 @app.post("/webhook/stripe")
 def stripe_webhook():
@@ -601,6 +640,7 @@ def stripe_webhook():
             pass
 
     return jsonify(ok=True)
+
 
 # ---------------- Receipt / Download ----------------
 @app.get("/receipt")
@@ -655,6 +695,7 @@ def receipt():
         "ts": _now_utc(),
     })
 
+
 # ---------------- Hardened download-by-session (never 500) ----------------
 @app.get("/download-by-session")
 def download_by_session():
@@ -699,6 +740,7 @@ def download_by_session():
 
     except Exception as e:
         return jsonify(ok=False, error=f"download route error: {e}"), 400
+
 
 # ------------- main (optional local run) -------------
 if __name__ == "__main__":
