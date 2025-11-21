@@ -1,4 +1,4 @@
-// src/App.jsx — v1.3.2 (streamlined; grants.gov-only links; backend v11 aligned)
+// src/App.jsx — v1.4 (revenue-ready; no free external links; backend v11.1 aligned)
 import { useEffect, useState } from "react";
 import {
   shortlist,
@@ -41,7 +41,7 @@ const STATES = [
   { value: "WY", label: "WY — Wyoming" },
 ];
 
-/* -------- Safe link helper: always a Grants.gov URL -------- */
+/* -------- (Kept for future) Safe Grants.gov URL helper -------- */
 function safeProgramUrl(u, title, tags = []) {
   try {
     if (typeof u === "string" && u.startsWith("http") && u.includes("grants.gov")) return u;
@@ -76,14 +76,21 @@ function ThanksScreen() {
             return;
           }
         }
-      } catch {}
+      } catch {
+        // ignore and keep polling
+      }
       tries += 1;
-      if (mounted && tries < 15) setTimeout(poll, 2000);
-      else if (mounted && !url) setUrl(downloadUrlBySession(sid));
+      if (mounted && tries < 15) {
+        setTimeout(poll, 2000);
+      } else if (mounted && !url) {
+        // fallback: computed URL (even if webhook/receipt log lagged)
+        setUrl(downloadUrlBySession(sid));
+      }
     };
 
     poll();
     return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -103,12 +110,16 @@ function ThanksScreen() {
         ) : (
           <p className="error">{err || "Preparing your file..."}</p>
         )}
-        <p className="muted">Keep this link for your records. You can request edits before submission.</p>
+        <p className="muted">
+          Keep this link for your records. You can request edits before any submission.
+        </p>
       </section>
 
       <footer className="footer">
         <p>© 2025 GrantForgeUSA</p>
-        <p className="muted">This product uses AI to generate previews and draft language. Review and edit before any submission.</p>
+        <p className="muted">
+          This product uses AI to generate draft language. Review and edit before submitting to any funder.
+        </p>
       </footer>
     </div>
   );
@@ -150,13 +161,16 @@ function IntakeApp() {
   }
 
   async function handleSeeRecommendations() {
-    setError(""); setLoading(true); setResults([]); setPreviews({});
+    setError("");
+    setLoading(true);
+    setResults([]);
+    setPreviews({});
     try {
       const data = await shortlist(intakePayload());
       if (!data.ok) throw new Error(data.error || "Could not fetch recommendations.");
       setResults(data.results || []);
     } catch (e) {
-      setError(e.message);
+      setError(e.message || "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -170,21 +184,22 @@ function IntakeApp() {
       if (!data.ok) throw new Error(data.error || "Preview failed.");
       setPreviews(p => ({ ...p, [row.title]: data.summary }));
     } catch (e) {
-      setError(e.message);
+      setError(e.message || "Preview failed. Please try again.");
     } finally {
       setPreviewBusy(p => ({ ...p, [row.title]: false }));
     }
   }
 
   async function handlePay(row) {
-    setError(""); setLoading(true);
+    setError("");
+    setLoading(true);
     try {
       const body = { ...intakePayload(), grant: row };
       const data = await createCheckoutSession(body);
       if (!data.ok) throw new Error(data.error || "Checkout failed.");
       window.location.href = data.url;
     } catch (e) {
-      setError(e.message);
+      setError(e.message || "Checkout failed. Please try again or contact support.");
     } finally {
       setLoading(false);
     }
@@ -199,10 +214,20 @@ function IntakeApp() {
 
       <section className="card">
         <h2>Tell us about your project (Free Intake)</h2>
-        <p className="muted">Intake is free. You only pay if you want a full custom draft.</p>
+        <p className="muted">
+          Intake and recommendations are free. You only pay when you choose to generate a full custom draft PDF.
+        </p>
+        <p className="muted" style={{ marginTop: 4 }}>
+          Typical pricing: Teachers ≈ <strong>$9.99</strong> per draft. Most orgs ≈ <strong>$49–$199</strong>,
+          automatically sized to your budget.
+        </p>
 
         <label>Organization
-          <input value={org} onChange={e=>setOrg(e.target.value)} placeholder="Your organization" />
+          <input
+            value={org}
+            onChange={e=>setOrg(e.target.value)}
+            placeholder="Your organization"
+          />
         </label>
 
         <label>Who are you?
@@ -220,37 +245,70 @@ function IntakeApp() {
 
         <label>State (optional)
           <select value={stateUS} onChange={e=>setStateUS(e.target.value)}>
-            {STATES.map(s => (<option key={s.value} value={s.value}>{s.label}</option>))}
+            {STATES.map(s => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
           </select>
         </label>
 
         <label>Keywords (comma separated)
-          <input value={keywords} onChange={e=>setKeywords(e.target.value)} placeholder="e.g., STEM, robotics, classroom equipment, Title 1" />
+          <input
+            value={keywords}
+            onChange={e=>setKeywords(e.target.value)}
+            placeholder="e.g., STEM, robotics, classroom equipment, Title 1"
+          />
         </label>
 
         <div className="grid2">
           <label>Amount Requested (USD)
-            <input type="number" value={amountRequested} onChange={e=>setAmountRequested(e.target.value)} placeholder="e.g., 2500" />
+            <input
+              type="number"
+              value={amountRequested}
+              onChange={e=>setAmountRequested(e.target.value)}
+              placeholder="e.g., 2500"
+            />
           </label>
           <label>Annual Budget (USD)
-            <input type="number" value={annualBudget} onChange={e=>setAnnualBudget(e.target.value)} placeholder="e.g., 60000" />
+            <input
+              type="number"
+              value={annualBudget}
+              onChange={e=>setAnnualBudget(e.target.value)}
+              placeholder="e.g., 60000"
+            />
           </label>
         </div>
 
         <label>Project Title
-          <input value={projectTitle} onChange={e=>setProjectTitle(e.target.value)} placeholder="Short name of the project" />
+          <input
+            value={projectTitle}
+            onChange={e=>setProjectTitle(e.target.value)}
+            placeholder="Short name of the project"
+          />
         </label>
 
         <label>What do you need & when?
-          <input value={timeline} onChange={e=>setTimeline(e.target.value)} placeholder="What do you need & when?" />
+          <input
+            value={timeline}
+            onChange={e=>setTimeline(e.target.value)}
+            placeholder="What do you need & when?"
+          />
         </label>
 
         <label>Audience / Who benefits?
-          <input value={audience} onChange={e=>setAudience(e.target.value)} placeholder="Who is served (students, vets, etc.)" />
+          <input
+            value={audience}
+            onChange={e=>setAudience(e.target.value)}
+            placeholder="Who is served (students, vets, etc.)"
+          />
         </label>
 
         <label>Notes (optional)
-          <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Anything reviewers should know" rows={3} />
+          <textarea
+            value={notes}
+            onChange={e=>setNotes(e.target.value)}
+            placeholder="Anything reviewers should know"
+            rows={3}
+          />
         </label>
 
         <button disabled={loading} onClick={handleSeeRecommendations}>
@@ -262,27 +320,28 @@ function IntakeApp() {
       {results.length > 0 && (
         <section className="results">
           <h3>Recommended Opportunities</h3>
+          <p className="muted">
+            We show a short list of good fits. Full funder links and a detailed draft PDF are provided after payment.
+          </p>
           <ul>
             {results.map((row, i) => (
               <li key={i} className="result">
                 <div className="row1">
-                  <a
-                    href={safeProgramUrl(row.program_url, row.title, row.tags)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {row.title}
-                  </a>
-                  <span> — {row.amount} — Deadline {row.deadline} — Fit {row.fit}</span>
+                  <strong>{row.title}</strong>
+                  <span>
+                    {" — up to "}{row.amount}
+                    {" — Deadline "}{row.deadline}
+                    {" — Fit "}{row.fit}
+                  </span>
                 </div>
 
                 {Array.isArray(row.tags) && row.tags.length > 0 && (
                   <div className="muted" style={{ marginTop: 4 }}>
-                    Tags: {row.tags.join(", ")}
+                    Focus areas: {row.tags.join(", ")}
                   </div>
                 )}
 
-                {row.fit_notes && <div className="notes">Notes: {row.fit_notes}</div>}
+                {row.fit_notes && <div className="notes">Fit notes: {row.fit_notes}</div>}
 
                 <div className="actions">
                   <button
@@ -290,13 +349,18 @@ function IntakeApp() {
                     disabled={!!previewBusy[row.title] || loading}
                     aria-busy={!!previewBusy[row.title]}
                   >
-                    {previewBusy[row.title] ? "Building preview…" : "Preview (Free)"}
+                    {previewBusy[row.title] ? "Building preview…" : "See Sample Language (Free)"}
                   </button>
-                  <button onClick={()=>handlePay(row)} disabled={loading}>Draft this (Pay)</button>
+                  <button onClick={()=>handlePay(row)} disabled={loading}>
+                    Generate Full Draft (Pay)
+                  </button>
                 </div>
 
                 {previews[row.title] && (
-                  <div className="preview">{previews[row.title]}</div>
+                  <div className="preview">
+                    <p className="muted">Sample only — your paid draft is longer and fully formatted.</p>
+                    <pre>{previews[row.title]}</pre>
+                  </div>
                 )}
               </li>
             ))}
