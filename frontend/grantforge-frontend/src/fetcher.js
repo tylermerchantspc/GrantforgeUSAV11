@@ -1,4 +1,4 @@
-// src/fetcher.js — v1.3.1 (production locked, backend v11 aligned)
+// src/fetcher.js — v1.4 (backend v11.1 aligned, production safe)
 import { ENDPOINTS, API_BASE } from "./config";
 
 /* ---------- safe fetch helper with timeout & clearer errors ---------- */
@@ -8,15 +8,40 @@ async function safeFetch(url, options = {}, { timeoutMs = 20000 } = {}) {
 
   try {
     const res = await fetch(url, { ...options, signal: controller.signal });
+    const contentType = res.headers.get("content-type") || "";
+
+    // Try to parse JSON if possible
+    const parseJson = async () => {
+      try {
+        return await res.json();
+      } catch {
+        return null;
+      }
+    };
+
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
+      const maybeJson = await parseJson();
+      if (maybeJson && typeof maybeJson === "object") {
+        // Backend uses { ok: false, error: "..." } on failures
+        if (maybeJson.error) {
+          throw new Error(maybeJson.error);
+        }
+      }
+      const text = !maybeJson ? await res.text().catch(() => "") : "";
       throw new Error(
         `HTTP ${res.status} ${res.statusText}${
           text ? ` — ${text.slice(0, 200)}` : ""
         }`
       );
     }
-    return await res.json();
+
+    if (contentType.includes("application/json")) {
+      const data = await parseJson();
+      return data ?? { ok: false, error: "Empty JSON response" };
+    }
+
+    // Fallback: non-JSON but ok
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   } finally {
@@ -25,7 +50,9 @@ async function safeFetch(url, options = {}, { timeoutMs = 20000 } = {}) {
 }
 
 /* ---------- API wrappers ---------- */
+
 export async function shortlist(payload) {
+  // includeExpired forced false from frontend for now
   const body = JSON.stringify({ includeExpired: false, ...(payload || {}) });
   return safeFetch(ENDPOINTS.questionnaire, {
     method: "POST",
@@ -58,13 +85,27 @@ export async function receiptBySession(sessionId) {
 }
 
 export function downloadUrlBySession(sessionId) {
-  return `${ENDPOINTS.downloadBySession}?session_id=${encodeURIComponent(sessionId)}`;
+  return `${ENDPOINTS.downloadBySession}?session_id=${encodeURIComponent(
+    sessionId
+  )}`;
 }
 
 /* ---------- Backend diagnostics (optional) ---------- */
+
 export async function debugPaths() {
   try {
     const res = await fetch(ENDPOINTS.debugPaths, { method: "GET" });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/* ---------- Health check helper (optional UI) ---------- */
+
+export async function getHealth() {
+  try {
+    const res = await fetch(ENDPOINTS.health, { method: "GET" });
     return await res.json();
   } catch (e) {
     return { ok: false, error: String(e) };
