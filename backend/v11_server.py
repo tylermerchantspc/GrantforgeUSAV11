@@ -1,7 +1,7 @@
-# GrantforgeUSA — v11.1 backend (TEST/LIVE READY)
+# GrantforgeUSA — v11.2 backend (TEST/LIVE READY)
 # Purpose: shortlist w/ real matching + fraud checks, Stripe checkout,
-#          reliable PDF download (eager + webhook), contextual previews,
-#          and debug utilities.
+#          REAL narrative draft generation, reliable PDF download
+#          (eager + webhook), contextual previews, and debug utilities.
 
 import os, json, glob
 from datetime import datetime, date
@@ -133,43 +133,6 @@ def _wrap_draw_line(c: canvas.Canvas, text: str, start_x: int, y: int, width_cha
         y -= 14
     c.drawString(start_x, y, line)
     return y - 14
-
-
-def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
-    """Generate a simple, reliable PDF from the given payload."""
-    os.makedirs(PDF_DIR, exist_ok=True)  # ensure exists at write time
-    pdf_path = os.path.join(PDF_DIR, f"{order_id}.pdf")
-    c = canvas.Canvas(pdf_path, pagesize=letter)
-
-    # Header
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, 770, f"GrantforgeUSA | Draft ({_pdf_header_mode_note()})")
-    c.setFont("Helvetica", 10)
-    c.drawString(50, 755, f"Order: {order_id}")
-    c.drawString(50, 742, f"Created: {_now_utc()}")
-
-    # Body
-    y = 720
-    c.setFont("Helvetica", 10)
-    # Sort payload keys for stable output (important for tests)
-    for k in sorted(payload.keys()):
-        v = payload[k]
-        if y < 60:
-            c.showPage()
-            y = 770
-            c.setFont("Helvetica", 10)
-        y = _wrap_draw_line(c, f"{k}: {v}", 50, y)
-
-    # Footer
-    if y < 80:
-        c.showPage()
-        y = 770
-        c.setFont("Helvetica", 10)
-
-    c.setFont("Helvetica-Oblique", 9)
-    c.drawString(50, 50, "Psalm 127:1 — Built with Faith. AI-generated draft; not an award or guarantee.")
-    c.save()
-    return pdf_path
 
 
 def price_for(category: str, annual_budget: float) -> float:
@@ -332,6 +295,241 @@ def find_log_by_session(session_id: str) -> Dict[str, Any]:
         return {}
 
 
+# -------- contextual preview helpers --------
+def _mk_objectives_from_keywords(kws: List[str], audience: str) -> List[str]:
+    # turn user keywords into concrete, de-duplicated objectives
+    uniq = []
+    for k in kws:
+        if k and k not in uniq:
+            uniq.append(k)
+    out = []
+    if not uniq:
+        return out
+    # map common terms -> concrete actions
+    for k in uniq[:4]:
+        if k in ("stem", "robotics", "technology", "tech"):
+            out.append(f"Purchase starter robotics/tech kits and integrate weekly {k.upper()} labs for {audience or 'participants'}.")
+        elif k in ("equipment", "supplies"):
+            out.append("Acquire durable classroom equipment and consumable supplies required to deliver activities.")
+        elif k in ("training", "workshop", "professional", "professional development", "pd"):
+            out.append("Provide teacher/staff PD workshops to ensure safe, effective program delivery.")
+        elif k in ("after-school", "afterschool", "tutoring"):
+            out.append("Launch a structured after-school tutoring/enrichment block with pre/post skill checks.")
+        elif k in ("cte", "workforce"):
+            out.append("Align activities to CTE/workforce competencies with employer input and mock assessments.")
+        else:
+            out.append(f"Implement targeted activities related to “{k}” with measurable outputs.")
+    return out
+
+
+def _mk_evaluation_lines(audience: str) -> List[str]:
+    who = audience or "participants"
+    return [
+        f"Track attendance and dosage for all {who}.",
+        "Use short pre/post assessments tied to lesson objectives.",
+        "Collect teacher/facilitator observations and student feedback.",
+    ]
+
+
+def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
+    """
+    Build a structured narrative draft from intake + grant.
+    Used for both preview (shortened) and full paid draft PDF.
+    """
+    org = (intake.get("organization") or "Your Organization").strip()
+    proj_title = (intake.get("projectTitle") or "Proposed initiative").strip()
+    audience = (intake.get("audience") or "").strip() or "participants"
+    timeline = (intake.get("timeline") or "TBA").strip()
+    notes = (intake.get("notes") or "").strip()
+    category = (intake.get("category") or intake.get("who") or "organization").strip()
+
+    amount = _safe_float(intake.get("amountRequested"))
+    annual_budget = _safe_float(intake.get("annualBudget"), 0)
+    keywords_str = (intake.get("keywords") or "").strip()
+    kws = _norm_words(keywords_str)
+
+    g_title = grant.get("title") or "Selected opportunity"
+    g_deadline = grant.get("deadline") or "TBA"
+    g_match = int(grant.get("requires_match_percent", 0) or 0)
+    g_max = _safe_float(grant.get("max_amount"), 0)
+    g_tags = grant.get("tags", []) or []
+
+    if amount > 0:
+        req_str = f"approximately ${amount:,.0f}"
+    else:
+        req_str = "a competitive grant amount aligned with program guidance"
+
+    if annual_budget > 0:
+        budget_str = f"with an estimated annual operating budget of ${annual_budget:,.0f}."
+    else:
+        budget_str = "with a modest operating budget and clear stewardship of funds."
+
+    focus_str = keywords_str or "addressing clearly documented local needs"
+    tag_phrase = ", ".join(g_tags[:4]) if g_tags else "the funder’s stated priorities"
+
+    # Objectives & evaluation
+    objectives = _mk_objectives_from_keywords(kws, audience)
+    evaluation = _mk_evaluation_lines(audience)
+
+    # 1) Project Summary
+    p1 = (
+        f"{org} proposes “{proj_title}” to support {audience} through activities focused on {focus_str}. "
+        f"The project will request {req_str} under the {g_title} opportunity, "
+        f"with an implementation timeline of {timeline}. "
+        f"The applicant currently operates as {category} {budget_str}"
+    )
+
+    # 2) Need Statement
+    if notes:
+        need_body = notes
+    else:
+        need_body = (
+            f"The target population faces barriers related to limited access to high-quality resources, "
+            f"programming, and supports. Without targeted investment, {audience} are less likely to "
+            f"receive consistent, structured services that improve outcomes over time."
+        )
+    p2 = (
+        "There is a clear documented need for this project. "
+        + need_body
+    )
+
+    # 3) Objectives
+    if not objectives:
+        objectives = [
+            "Increase access to high-quality programming connected to the grant’s priorities.",
+            "Improve participant engagement and measurable outcomes over the project period.",
+            "Strengthen the applicant’s capacity to sustain successful activities beyond the grant term.",
+        ]
+
+    obj_lines = []
+    for i, line in enumerate(objectives, 1):
+        obj_lines.append(f"{i}. {line}")
+    p3 = "Project Objectives:\n" + "\n".join(obj_lines)
+
+    # 4) Key Activities
+    act_lines = [
+        "Design and deliver structured sessions aligned to clear lesson or activity plans.",
+        "Coordinate staffing, scheduling, and communication with participating stakeholders.",
+        "Integrate family, community, or partner engagement where appropriate.",
+    ]
+    if "after-school" in keywords_str.lower() or "afterschool" in keywords_str.lower():
+        act_lines.append("Offer after-school programming with safe supervision, enrichment, and academic support.")
+    if "stem" in keywords_str.lower() or "robotics" in keywords_str.lower():
+        act_lines.append("Implement hands-on STEM/robotics activities that build problem-solving and teamwork skills.")
+    p4 = "Key Activities & Approach:\n" + "\n".join(f"- {l}" for l in act_lines)
+
+    # 5) Budget Summary
+    budget_lines = [
+        "Grant funds will be used for allowable costs such as materials, supplies, limited equipment, and staffing.",
+        "The applicant will follow all federal, state, and local procurement and fiscal accountability requirements.",
+    ]
+    if g_match > 0:
+        budget_lines.append(
+            f"The applicant will meet the required {g_match}% match through eligible in-kind or cash contributions."
+        )
+    if g_max > 0 and amount > 0:
+        budget_lines.append(
+            f"The requested amount of {req_str} falls within the program’s published range (up to ${g_max:,.0f}, as applicable)."
+        )
+    p5 = "Budget Summary:\n" + "\n".join(f"- {l}" for l in budget_lines)
+
+    # 6) Evaluation Plan
+    eval_lines = []
+    for i, line in enumerate(evaluation, 1):
+        eval_lines.append(f"{i}. {line}")
+    p6 = "Evaluation Plan:\n" + "\n".join(eval_lines)
+
+    # 7) Alignment with Funder Priorities
+    align_text = (
+        f"This project aligns with {g_title} by advancing activities related to {tag_phrase}. "
+        f"All proposed activities and costs will adhere to program guidance, applicable regulations, "
+        f"and ethical standards. The applicant understands that this draft is a starting point and will "
+        f"review, refine, and customize language prior to any final submission."
+    )
+    deadline_note = f"The current anticipated deadline is {g_deadline}."
+    p7 = align_text + " " + deadline_note
+
+    return "\n\n".join([p1, p2, p3, p4, p5, p6, p7])
+
+
+def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
+    """
+    Generate a PDF from the given payload.
+    If 'draft_body' is present, render a structured narrative + order details.
+    Otherwise, fall back to key/value listing (legacy).
+    """
+    os.makedirs(PDF_DIR, exist_ok=True)  # ensure exists at write time
+    pdf_path = os.path.join(PDF_DIR, f"{order_id}.pdf")
+    c = canvas.Canvas(pdf_path, pagesize=letter)
+
+    # Header
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, 770, f"GrantforgeUSA | Draft ({_pdf_header_mode_note()})")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, 755, f"Order: {order_id}")
+    c.drawString(50, 742, f"Created: {_now_utc()}")
+
+    # Body
+    y = 720
+    c.setFont("Helvetica", 10)
+
+    draft_body = payload.get("draft_body")
+    if isinstance(draft_body, str) and draft_body.strip():
+        # Narrative first
+        c.setFont("Helvetica-Bold", 11)
+        y = _wrap_draw_line(c, "Draft Narrative", 50, y)
+        c.setFont("Helvetica", 10)
+
+        for para in draft_body.split("\n\n"):
+            for line in para.split("\n"):
+                if y < 60:
+                    c.showPage()
+                    y = 770
+                    c.setFont("Helvetica", 10)
+                y = _wrap_draw_line(c, line, 50, y)
+            y -= 6  # small extra spacing between paragraphs
+
+        # Order details
+        if y < 80:
+            c.showPage()
+            y = 770
+            c.setFont("Helvetica", 10)
+
+        c.setFont("Helvetica-Bold", 11)
+        y = _wrap_draw_line(c, "Order Details", 50, y)
+        c.setFont("Helvetica", 10)
+
+        for k in sorted(payload.keys()):
+            if k == "draft_body":
+                continue
+            v = payload[k]
+            if y < 60:
+                c.showPage()
+                y = 770
+                c.setFont("Helvetica", 10)
+            y = _wrap_draw_line(c, f"{k}: {v}", 50, y)
+    else:
+        # Legacy: just dump payload keys (should be rare now)
+        for k in sorted(payload.keys()):
+            v = payload[k]
+            if y < 60:
+                c.showPage()
+                y = 770
+                c.setFont("Helvetica", 10)
+            y = _wrap_draw_line(c, f"{k}: {v}", 50, y)
+
+    # Footer
+    if y < 80:
+        c.showPage()
+        y = 770
+        c.setFont("Helvetica", 10)
+
+    c.setFont("Helvetica-Oblique", 9)
+    c.drawString(50, 50, "Psalm 127:1 — Built with Faith. AI-generated draft; not an award or guarantee.")
+    c.save()
+    return pdf_path
+
+
 # ---------------- health ----------------
 @app.get("/")
 def home():
@@ -406,42 +604,6 @@ def search():
     return questionnaire()
 
 
-# -------- contextual preview helpers --------
-def _mk_objectives_from_keywords(kws: List[str], audience: str) -> List[str]:
-    # turn user keywords into concrete, de-duplicated objectives
-    uniq = []
-    for k in kws:
-        if k and k not in uniq:
-            uniq.append(k)
-    out = []
-    if not uniq:
-        return out
-    # map common terms -> concrete actions
-    for k in uniq[:4]:
-        if k in ("stem", "robotics", "technology", "tech"):
-            out.append(f"Purchase starter robotics/tech kits and integrate weekly {k.upper()} labs for {audience or 'participants'}.")
-        elif k in ("equipment", "supplies"):
-            out.append("Acquire durable classroom equipment and consumable supplies required to deliver activities.")
-        elif k in ("training", "workshop", "professional", "professional development", "pd"):
-            out.append("Provide teacher/staff PD workshops to ensure safe, effective program delivery.")
-        elif k in ("after-school", "afterschool", "tutoring"):
-            out.append("Launch a structured after-school tutoring/enrichment block with pre/post skill checks.")
-        elif k in ("cte", "workforce"):
-            out.append("Align activities to CTE/workforce competencies with employer input and mock assessments.")
-        else:
-            out.append(f"Implement targeted activities related to “{k}” with measurable outputs.")
-    return out
-
-
-def _mk_evaluation_lines(audience: str) -> List[str]:
-    who = audience or "participants"
-    return [
-        f"Track attendance and dosage for all {who}.",
-        "Use short pre/post assessments tied to lesson objectives.",
-        "Collect teacher/facilitator observations and student feedback.",
-    ]
-
-
 # ---------------- contextual preview ----------------
 @app.post("/preview")
 def preview():
@@ -450,67 +612,18 @@ def preview():
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
 
-    org = (data.get("organization") or "Your Organization").strip()
-    topic = (data.get("keywords") or "").strip()
-    title = (data.get("projectTitle") or "Proposed initiative").strip()
-    audience = (data.get("audience") or "").strip()
-    timeline = (data.get("timeline") or "").strip()
-    amount = _safe_float(data.get("amountRequested"))
-
     grant = data.get("grant") or {}
     if not grant:
         short = shortlist(data)
         if short:
             grant = short[0]
 
-    g_title = grant.get("title") or "Selected opportunity"
-    g_deadline = grant.get("deadline") or "TBA"
-    g_match = int(grant.get("requires_match_percent", 0) or 0)
-    g_max = _safe_float(grant.get("max_amount"), 0)
+    # Build full draft, then shorten for preview
+    full_draft = build_draft_text(data, grant)
+    paras = full_draft.split("\n\n")
+    preview_text = "\n\n".join(paras[:4])  # first few sections only
 
-    kws = _norm_words(topic)
-    aligns: List[str] = []
-    if topic:
-        aligns.append(f"focus on {topic}")
-    if audience:
-        aligns.append(f"benefits {audience}")
-    if amount:
-        if g_max and amount > g_max:
-            aligns.append(f"request ${amount:,.0f} EXCEEDS program max ${g_max:,.0f}")
-        elif g_max:
-            aligns.append(f"request ${amount:,.0f} within program max ${g_max:,.0f}")
-        else:
-            aligns.append(f"request ${amount:,.0f}")
-
-    details = [f"Deadline: {g_deadline}."]
-    if g_match:
-        details.append(f"Match required: {g_match}%.")
-
-    # Build sections
-    objectives = _mk_objectives_from_keywords(kws, audience)
-    evaluation = _mk_evaluation_lines(audience)
-
-    parts = []
-    parts.append(
-        f"{org} proposes “{title},” aligned to **{g_title}** ({' '.join(details)}) — "
-        f"{', '.join(aligns) or 'addresses documented community need'}. "
-        f"Timeline: {timeline or 'TBA'}."
-    )
-
-    if objectives:
-        parts.append("Objectives:")
-        for i, line in enumerate(objectives, 1):
-            parts.append(f"{i}. {line}")
-    else:
-        parts.append("Objectives: Define 2–3 measurable outcomes tied to the requested resources.")
-
-    parts.append("Budget Summary: Requested funds cover equipment/materials, limited training, and evaluation tasks aligned to the objectives above.")
-    parts.append("Evaluation Plan:")
-    for i, line in enumerate(evaluation, 1):
-        parts.append(f"{i}. {line}")
-
-    summary = "\n".join(parts)
-    return jsonify(ok=True, summary=summary)
+    return jsonify(ok=True, summary=preview_text)
 
 
 # ---------------- Stripe Checkout ----------------
@@ -545,6 +658,10 @@ def create_checkout_session():
     product_name = f"Grant Draft — {category}"
 
     order_id = datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
+
+    # Build narrative draft now so PDF is ready immediately after checkout
+    draft_body = build_draft_text(data, grant)
+
     metadata = {
         "order_id": order_id,
         "org": org,
@@ -592,12 +709,15 @@ def create_checkout_session():
         "price": price,
         "pdf_path": "",
         "paid": False,
+        "draft_body": draft_body,
     }
     _append_payment_log_row(row)
 
-    # eager PDF (from metadata)
+    # eager PDF (from metadata + draft_body)
     try:
-        pdf_path = make_pdf(order_id, metadata)
+        pdf_payload = dict(metadata)
+        pdf_payload["draft_body"] = draft_body
+        pdf_path = make_pdf(order_id, pdf_payload)
         _update_payment_log_by("order_id", order_id, {"pdf_path": pdf_path})
     except Exception:
         pass
@@ -622,22 +742,27 @@ def stripe_webhook():
         session_obj = event["data"]["object"]
         session_id = session_obj.get("id")
         md = session_obj.get("metadata") or {}
-        order_id = md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
 
-        payload_for_pdf = dict(md)
-        payload_for_pdf.update({
-            "stripe_session_id": session_id,
-            "payment_status": session_obj.get("payment_status"),
-            "amount_total": session_obj.get("amount_total"),
-            "currency": session_obj.get("currency"),
-            "mode": session_obj.get("mode"),
-        })
-
-        try:
-            pdf_path = make_pdf(order_id, payload_for_pdf)
-            _update_payment_log_by("session_id", session_id, {"pdf_path": pdf_path, "paid": True})
-        except Exception:
-            pass
+        # If we already generated a PDF at checkout, just mark as paid
+        row = find_log_by_session(session_id)
+        if row and row.get("pdf_path") and os.path.exists(row["pdf_path"]):
+            _update_payment_log_by("session_id", session_id, {"paid": True})
+        else:
+            # Fallback: generate a basic PDF from metadata + payment info
+            order_id = md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
+            payload_for_pdf = dict(md)
+            payload_for_pdf.update({
+                "stripe_session_id": session_id,
+                "payment_status": session_obj.get("payment_status"),
+                "amount_total": session_obj.get("amount_total"),
+                "currency": session_obj.get("currency"),
+                "mode": session_obj.get("mode"),
+            })
+            try:
+                pdf_path = make_pdf(order_id, payload_for_pdf)
+                _update_payment_log_by("session_id", session_id, {"pdf_path": pdf_path, "paid": True})
+            except Exception:
+                pass
 
     return jsonify(ok=True)
 
