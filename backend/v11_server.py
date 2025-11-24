@@ -1,4 +1,4 @@
-# GrantforgeUSA — v11.2 backend (TEST/LIVE READY)
+# GrantforgeUSA — v11.3 backend (TEST/LIVE READY)
 # Purpose: shortlist w/ real matching + fraud checks, Stripe checkout,
 #          REAL narrative draft generation, reliable PDF download
 #          (eager + webhook), contextual previews, and debug utilities.
@@ -106,7 +106,10 @@ def _is_expired(deadline_str: str) -> bool:
 
 
 def fallback_grants_gov_url(title: str, tags: List[str]) -> str:
-    # robust Grants.gov search endpoint
+    """
+    Build a Grants.gov search URL using title + tags.
+    If your grants.json has a direct funding-opportunity URL, that will be used instead.
+    """
     q = "+".join(_norm_words(title)[:6] + [t.lower() for t in (tags or [])][:4])
     return f"https://www.grants.gov/search-grants?keywords={q}"
 
@@ -116,6 +119,15 @@ def _ensure_http_url(url: str, title: str, tags: List[str]) -> str:
     if isinstance(url, str) and url.startswith(("http://", "https://")) and "grants.gov" in url:
         return url
     return fallback_grants_gov_url(title or "", tags or [])
+
+
+def grant_display_url(gr: Dict[str, Any]) -> str:
+    """
+    Single place to decide which URL we treat as the 'official' link.
+    If you later add 'funding_url' or similar to grants.json, prefer it here.
+    """
+    raw = gr.get("funding_url") or gr.get("program_url") or ""
+    return _ensure_http_url(raw, gr.get("title", ""), gr.get("tags", []) or [])
 
 
 def _pdf_header_mode_note() -> str:
@@ -173,54 +185,70 @@ def fraud_check(category: str, amount: float) -> Dict[str, Any]:
 
 
 def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float, state: str) -> Dict[str, Any]:
+    """
+    Compute a score + qualitative fit and human-readable notes.
+    Goal: more 'true' shortlisting based on your internal grants.json.
+    """
     score = 0
     fit_notes: List[str] = []
 
+    cat_lower = (category or "").lower()
+
     # category eligibility
     elig = [e.lower() for e in gr.get("eligible_types", [])]
-    if any(t in (category or "").lower() for t in elig):
+    if any(e in cat_lower for e in elig):
         score += 2
     else:
-        fit_notes.append("Category not an explicit match")
+        fit_notes.append("Category not an explicit match.")
 
     # amount window
     min_amt = _safe_float(gr.get("min_amount"), 0.0)
     max_amt = _safe_float(gr.get("max_amount"), 10**12)
     if amount < min_amt:
-        fit_notes.append(f"Ask (${amount:,.0f}) is below minimum (${min_amt:,.0f})")
+        fit_notes.append(f"Ask (${amount:,.0f}) is below minimum (${min_amt:,.0f}).")
     elif amount > max_amt:
-        fit_notes.append(f"Ask (${amount:,.0f}) exceeds maximum (${max_amt:,.0f})")
+        fit_notes.append(f"Ask (${amount:,.0f}) exceeds maximum (${max_amt:,.0f}).")
     else:
         score += 2
 
     # keywords vs tags
     tags = [t.lower() for t in gr.get("tags", [])]
     overlap = set(kws) & set(tags)
-    score += min(len(overlap), 3)  # up to +3
+    if overlap:
+        score += min(len(overlap), 3)  # up to +3
+        fit_notes.append("Good overlap with focus areas: " + ", ".join(sorted(overlap)) + ".")
+    else:
+        fit_notes.append("Limited keyword overlap with focus areas.")
 
     # deadline
     if _deadline_ok(gr.get("deadline", "")):
         score += 1
     else:
-        fit_notes.append("Deadline has passed")
+        fit_notes.append("Deadline has passed.")
 
     # state/region (if data present)
     states = [s.lower() for s in gr.get("eligible_states", [])]
-    if states and state and state.lower() not in states:
-        fit_notes.append("State may not be eligible")
-    elif states:
-        score += 1
+    if states:
+        if state and state.lower() in states:
+            score += 1
+            fit_notes.append(f"Applicant state appears within eligible states ({state}).")
+        else:
+            fit_notes.append("Applicant state may not be explicitly listed as eligible.")
 
     # match % note
     req_match = int(gr.get("requires_match_percent", 0) or 0)
     if req_match > 0:
-        fit_notes.append(f"Requires {req_match}% match")
+        fit_notes.append(f"Requires approximately {req_match}% local match (cash or in-kind).")
 
     fit = "High" if score >= 6 else "Medium" if score >= 3 else "Low"
-    return {"score": score, "fit": fit, "fit_notes": "; ".join(fit_notes)}
+    return {"score": score, "fit": fit, "fit_notes": " ".join(fit_notes)}
 
 
 def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Turn intake into 0–3 strong matches from backend/data/grants.json.
+    Data quality lives in grants.json; logic lives here.
+    """
     grants = _read_json(GRANTS_PATH) or []
     category = payload.get("category") or payload.get("who") or ""
     amount = _safe_float(payload.get("amountRequested"))
@@ -238,11 +266,11 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         if s["fit"] == "Low":
             continue
 
-        url = _ensure_http_url(gr.get("program_url", ""), gr.get("title", ""), gr.get("tags", []))
+        url = grant_display_url(gr)
         rows.append({
             "title": gr.get("title"),
             "program": gr.get("program") or gr.get("program_id") or gr.get("program_url") or "unknown",
-            "program_url": url,
+            "program_url": url,  # not shown on free UI, used in paid PDF
             "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
             "deadline": gr.get("deadline", "TBA"),
             "fit": s["fit"],
@@ -342,6 +370,7 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     timeline = (intake.get("timeline") or "TBA").strip()
     notes = (intake.get("notes") or "").strip()
     category = (intake.get("category") or intake.get("who") or "organization").strip()
+    state = (intake.get("state") or "").strip()
 
     amount = _safe_float(intake.get("amountRequested"))
     annual_budget = _safe_float(intake.get("annualBudget"), 0)
@@ -353,6 +382,8 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     g_match = int(grant.get("requires_match_percent", 0) or 0)
     g_max = _safe_float(grant.get("max_amount"), 0)
     g_tags = grant.get("tags", []) or []
+    g_geo = (grant.get("geo_scope") or "").strip()
+    g_url = grant_display_url(grant) if grant else ""
 
     if amount > 0:
         req_str = f"approximately ${amount:,.0f}"
@@ -367,6 +398,14 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     focus_str = keywords_str or "addressing clearly documented local needs"
     tag_phrase = ", ".join(g_tags[:4]) if g_tags else "the funder’s stated priorities"
 
+    # Region / scope note
+    region_bits = []
+    if g_geo:
+        region_bits.append(f"This opportunity is described as serving the {g_geo} region.")
+    if state:
+        region_bits.append(f"The applicant is based in {state}.")
+    region_note = " ".join(region_bits)
+
     # Objectives & evaluation
     objectives = _mk_objectives_from_keywords(kws, audience)
     evaluation = _mk_evaluation_lines(audience)
@@ -378,6 +417,8 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
         f"with an implementation timeline of {timeline}. "
         f"The applicant currently operates as {category} {budget_str}"
     )
+    if region_note:
+        p1 += " " + region_note
 
     # 2) Need Statement
     if notes:
@@ -425,11 +466,11 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     ]
     if g_match > 0:
         budget_lines.append(
-            f"The applicant will meet the required {g_match}% match through eligible in-kind or cash contributions."
+            f"The applicant will plan to meet the required {g_match}% match through eligible in-kind or cash contributions, as confirmed with the funder’s guidance."
         )
     if g_max > 0 and amount > 0:
         budget_lines.append(
-            f"The requested amount of {req_str} falls within the program’s published range (up to ${g_max:,.0f}, as applicable)."
+            f"The requested amount of {req_str} is being scoped with awareness of the program’s published range (up to approximately ${g_max:,.0f}, as applicable)."
         )
     p5 = "Budget Summary:\n" + "\n".join(f"- {l}" for l in budget_lines)
 
@@ -446,8 +487,17 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
         f"and ethical standards. The applicant understands that this draft is a starting point and will "
         f"review, refine, and customize language prior to any final submission."
     )
-    deadline_note = f"The current anticipated deadline is {g_deadline}."
-    p7 = align_text + " " + deadline_note
+    deadline_note = f"The current anticipated deadline in this draft is {g_deadline}."
+    url_note = ""
+    if g_url:
+        url_note = f" The funder’s official information or search page for this opportunity can be accessed on Grants.gov at: {g_url}."
+
+    compliance_note = (
+        " Before submitting, the applicant will re-verify eligibility, deadlines, required forms, "
+        "and match expectations using the official funding notice on Grants.gov or the funder’s website."
+    )
+
+    p7 = align_text + " " + deadline_note + url_note + compliance_note
 
     return "\n\n".join([p1, p2, p3, p4, p5, p6, p7])
 
@@ -662,6 +712,8 @@ def create_checkout_session():
     # Build narrative draft now so PDF is ready immediately after checkout
     draft_body = build_draft_text(data, grant)
 
+    grant_url = grant_display_url(grant) if grant else ""
+
     metadata = {
         "order_id": order_id,
         "org": org,
@@ -671,7 +723,7 @@ def create_checkout_session():
         "grant_title": grant.get("title", ""),
         "grant_program": grant.get("program", ""),
         "grant_deadline": grant.get("deadline", ""),
-        "grant_url": grant.get("program_url", ""),
+        "grant_url": grant_url,
         "price": f"{price:.2f}",
         "app_mode": APP_MODE,
     }
