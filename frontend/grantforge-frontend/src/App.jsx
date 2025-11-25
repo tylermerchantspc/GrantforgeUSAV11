@@ -1,4 +1,4 @@
-// src/App.jsx — v1.4 (revenue-ready; no free external links; backend v11.1 aligned)
+// src/App.jsx — v1.5 (revenue-ready; Grants.gov links; backend v11.2 aligned)
 import { useEffect, useState } from "react";
 import {
   shortlist,
@@ -321,7 +321,8 @@ function IntakeApp() {
         <section className="results">
           <h3>Recommended Opportunities</h3>
           <p className="muted">
-            We show a short list of good fits. Full funder links and a detailed draft PDF are provided after payment.
+            We show a short list of good fits. A detailed draft PDF is provided after payment, and you’ll get the
+            official Grants.gov link with your draft.
           </p>
           <ul>
             {results.map((row, i) => (
@@ -334,6 +335,19 @@ function IntakeApp() {
                     {" — Fit "}{row.fit}
                   </span>
                 </div>
+
+                {/* NEW: show Grants.gov link for transparency */}
+                {row.program_url && (
+                  <div className="muted" style={{ marginTop: 4 }}>
+                    <a
+                      href={row.program_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      View official notice on Grants.gov
+                    </a>
+                  </div>
+                )}
 
                 {Array.isArray(row.tags) && row.tags.length > 0 && (
                   <div className="muted" style={{ marginTop: 4 }}>
