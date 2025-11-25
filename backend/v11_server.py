@@ -1,4 +1,4 @@
-# GrantforgeUSA — v11.3 backend (TEST/LIVE READY)
+# GrantforgeUSA — v11.4 backend (TEST/LIVE READY)
 # Purpose: shortlist w/ real matching + fraud checks, Stripe checkout,
 #          REAL narrative draft generation, reliable PDF download
 #          (eager + webhook), contextual previews, and debug utilities.
@@ -366,8 +366,15 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     """
     org = (intake.get("organization") or "Your Organization").strip()
     proj_title = (intake.get("projectTitle") or "Proposed initiative").strip()
-    audience = (intake.get("audience") or "").strip() or "participants"
-    timeline = (intake.get("timeline") or "TBA").strip()
+
+    # Clean audience so it doesn't end with a stray period
+    raw_audience = (intake.get("audience") or "").strip()
+    audience = raw_audience.rstrip(".").strip() or "participants"
+
+    # Clean timeline; avoid double periods when user types a full sentence
+    raw_timeline = (intake.get("timeline") or "TBA").strip()
+    timeline = raw_timeline.rstrip().rstrip(".")
+
     notes = (intake.get("notes") or "").strip()
     category = (intake.get("category") or intake.get("who") or "organization").strip()
     state = (intake.get("state") or "").strip()
@@ -414,9 +421,18 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     p1 = (
         f"{org} proposes “{proj_title}” to support {audience} through activities focused on {focus_str}. "
         f"The project will request {req_str} under the {g_title} opportunity, "
-        f"with an implementation timeline of {timeline}. "
-        f"The applicant currently operates as {category} {budget_str}"
     )
+
+    if timeline and timeline.lower() != "tba":
+        # If user wrote a full sentence, keep it; otherwise treat as a phrase.
+        if any(ch in raw_timeline for ch in ".!?"):
+            p1 += f"{timeline} "
+        else:
+            p1 += f"with an implementation timeline of {timeline}. "
+    else:
+        p1 += "The implementation timeline will be finalized with the funder’s guidance. "
+
+    p1 += f"The applicant currently operates as {category} {budget_str}"
     if region_note:
         p1 += " " + region_note
 
@@ -429,10 +445,7 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
             f"programming, and supports. Without targeted investment, {audience} are less likely to "
             f"receive consistent, structured services that improve outcomes over time."
         )
-    p2 = (
-        "There is a clear documented need for this project. "
-        + need_body
-    )
+    p2 = "There is a clear documented need for this project. " + need_body
 
     # 3) Objectives
     if not objectives:
