@@ -118,7 +118,7 @@ function ThanksScreen() {
       <footer className="footer">
         <p>© 2025 GrantForgeUSA</p>
         <p className="muted">
-          This product uses AI to generate draft language. Review and edit before submitting to any funder.
+          This product uses proprietary software to generate draft language. Review and edit before submitting to any funder.
         </p>
       </footer>
     </div>
@@ -143,6 +143,9 @@ function IntakeApp() {
   const [previews, setPreviews] = useState({});
   const [error, setError] = useState("");
   const [previewBusy, setPreviewBusy] = useState({}); // per-row preview spinner/lock
+
+  const stateResults = results.filter(row => (row.level || "").toLowerCase() === "state");
+  const federalResults = results.filter(row => (row.level || "").toLowerCase() !== "state");
 
   function intakePayload() {
     return {
@@ -321,71 +324,112 @@ function IntakeApp() {
         <section className="results">
           <h3>Recommended Opportunities</h3>
           <p className="muted">
-            We show a short list of good fits. A detailed draft PDF is provided after payment, and you’ll get the
-            official Grants.gov link with your draft.
+            We show a short list of good fits. State options appear first when provided. A detailed draft PDF is provided
+            after payment, and you’ll get the official Grants.gov link with your draft.
           </p>
-          <ul>
-            {results.map((row, i) => (
-              <li key={i} className="result">
-                <div className="row1">
-                  <strong>{row.title}</strong>
-                  <span>
-                    {" — up to "}{row.amount}
-                    {" — Deadline "}{row.deadline}
-                    {" — Fit "}{row.fit}
-                  </span>
-                </div>
 
-                {/* NEW: show Grants.gov link for transparency */}
-                {row.program_url && (
-                  <div className="muted" style={{ marginTop: 4 }}>
-                    <a
-                      href={row.program_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      View official notice on Grants.gov
-                    </a>
-                  </div>
-                )}
+          {stateResults.length > 0 && (
+            <div className="results-group">
+              <h4>State Opportunities</h4>
+              <ul>
+                {stateResults.map((row, i) => (
+                  <li key={`state-${i}`} className="result">
+                    <div className="row1">
+                      <strong>{row.title}</strong>
+                      <span>
+                        {" — "}{row.amount}
+                        {" — Deadline "}{row.deadline}
+                      </span>
+                    </div>
 
-                {Array.isArray(row.tags) && row.tags.length > 0 && (
-                  <div className="muted" style={{ marginTop: 4 }}>
-                    Focus areas: {row.tags.join(", ")}
-                  </div>
-                )}
+                    {row.program_url && (
+                      <div className="muted" style={{ marginTop: 4 }}>
+                        <a
+                          href={row.program_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Open state grants portal
+                        </a>
+                      </div>
+                    )}
 
-                {row.fit_notes && <div className="notes">Fit notes: {row.fit_notes}</div>}
+                    {row.fit_notes && <div className="notes">Notes: {row.fit_notes}</div>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
-                <div className="actions">
-                  <button
-                    onClick={()=>handlePreview(row)}
-                    disabled={!!previewBusy[row.title] || loading}
-                    aria-busy={!!previewBusy[row.title]}
-                  >
-                    {previewBusy[row.title] ? "Building preview…" : "See Sample Language (Free)"}
-                  </button>
-                  <button onClick={()=>handlePay(row)} disabled={loading}>
-                    Generate Full Draft (Pay)
-                  </button>
-                </div>
+          {federalResults.length > 0 ? (
+            <div className="results-group">
+              <h4>Federal Opportunities</h4>
+              <ul>
+                {federalResults.map((row, i) => (
+                  <li key={`fed-${i}`} className="result">
+                    <div className="row1">
+                      <strong>{row.title}</strong>
+                      <span>
+                        {" — up to "}{row.amount}
+                        {" — Deadline "}{row.deadline}
+                        {" — Fit "}{row.fit}
+                      </span>
+                    </div>
 
-                {previews[row.title] && (
-                  <div className="preview">
-                    <p className="muted">Sample only — your paid draft is longer and fully formatted.</p>
-                    <pre>{previews[row.title]}</pre>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+                    {row.program_url && (
+                      <div className="muted" style={{ marginTop: 4 }}>
+                        <a
+                          href={row.program_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          View official notice on Grants.gov
+                        </a>
+                      </div>
+                    )}
+
+                    {Array.isArray(row.tags) && row.tags.length > 0 && (
+                      <div className="muted" style={{ marginTop: 4 }}>
+                        Focus areas: {row.tags.join(", ")}
+                      </div>
+                    )}
+
+                    {row.fit_notes && <div className="notes">Fit notes: {row.fit_notes}</div>}
+
+                    <div className="actions">
+                      <button
+                        onClick={()=>handlePreview(row)}
+                        disabled={!!previewBusy[row.title] || loading}
+                        aria-busy={!!previewBusy[row.title]}
+                      >
+                        {previewBusy[row.title] ? "Building preview…" : "See Sample Language (Free)"}
+                      </button>
+                      <button onClick={()=>handlePay(row)} disabled={loading}>
+                        Generate Full Draft (Pay)
+                      </button>
+                    </div>
+
+                    {previews[row.title] && (
+                      <div className="preview">
+                        <p className="muted">Sample only — your paid draft is longer and fully formatted.</p>
+                        <pre>{previews[row.title]}</pre>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="muted">No federal opportunities matched this intake. Adjust your keywords and try again.</p>
+          )}
         </section>
       )}
 
       <footer className="footer">
         <p>© 2025 GrantForgeUSA</p>
         <p className="muted">
-          This product uses AI to generate previews and draft language. Review and edit before any submission.
+          This product uses a proprietary drafting engine to generate previews and draft language. Review and edit before
+          any submission.
         </p>
       </footer>
     </div>

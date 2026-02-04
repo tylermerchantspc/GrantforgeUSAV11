@@ -89,6 +89,70 @@ def _safe_float(x, default=0.0) -> float:
         return default
 
 
+STATE_NAME_BY_ABBR = {
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "DC": "District of Columbia",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming",
+}
+
+
+STATE_PORTALS = {
+    "MN": {
+        "name": "Minnesota",
+        "url": "https://mn.gov/admin/citizen/grants/",
+        "label": "Minnesota Grants Portal",
+    },
+}
+
+
 def _deadline_ok(deadline_str: str) -> bool:
     try:
         d = date.fromisoformat(deadline_str)
@@ -145,6 +209,52 @@ def _wrap_draw_line(c: canvas.Canvas, text: str, start_x: int, y: int, width_cha
         y -= 14
     c.drawString(start_x, y, line)
     return y - 14
+
+
+def _state_full_name(state_abbrev: str) -> str:
+    return STATE_NAME_BY_ABBR.get((state_abbrev or "").upper(), "")
+
+
+def _state_search_terms(state_abbrev: str) -> List[str]:
+    abbr = (state_abbrev or "").upper()
+    full = _state_full_name(abbr)
+    return [t.lower() for t in (abbr, full) if t]
+
+
+def _state_portal_result(state_abbrev: str) -> Dict[str, Any]:
+    abbr = (state_abbrev or "").upper()
+    state_name = _state_full_name(abbr) or abbr
+    portal = STATE_PORTALS.get(abbr)
+    if portal:
+        return {
+            "title": portal["label"],
+            "program": "state-portal",
+            "program_url": portal["url"],
+            "amount": "Varies",
+            "deadline": "Varies",
+            "fit": "State",
+            "fit_notes": f"Official state grants portal for {portal['name']}.",
+            "requires_match_percent": 0,
+            "max_amount": 0,
+            "tags": ["State grants", portal["name"]],
+            "level": "State",
+        }
+
+    query = f"{state_name} state grants portal".strip()
+    search_url = f"https://search.usa.gov/search?query={query.replace(' ', '%20')}"
+    return {
+        "title": f"State Grants Portal Search — {state_name}",
+        "program": "state-portal-search",
+        "program_url": search_url,
+        "amount": "Varies",
+        "deadline": "Varies",
+        "fit": "State",
+        "fit_notes": "Search results for state grants portals and official listings.",
+        "requires_match_percent": 0,
+        "max_amount": 0,
+        "tags": ["State grants", state_name],
+        "level": "State",
+    }
 
 
 def price_for(category: str, annual_budget: float) -> float:
@@ -235,6 +345,20 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
         else:
             fit_notes.append("Applicant state may not be explicitly listed as eligible.")
 
+    # state relevance boost using abbreviation + full name
+    state_terms = _state_search_terms(state)
+    if state_terms:
+        search_blob = " ".join([
+            str(gr.get("title", "")),
+            str(gr.get("program", "")),
+            str(gr.get("program_id", "")),
+            str(gr.get("geo_scope", "")),
+            " ".join(gr.get("tags", []) or []),
+        ]).lower()
+        if any(term in search_blob for term in state_terms):
+            score += 1
+            fit_notes.append("Opportunity text references the applicant’s state.")
+
     # match % note
     req_match = int(gr.get("requires_match_percent", 0) or 0)
     if req_match > 0:
@@ -278,10 +402,17 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             "requires_match_percent": gr.get("requires_match_percent", 0),
             "max_amount": _safe_float(gr.get("max_amount"), 0),
             "tags": gr.get("tags", []),
+            "level": "Federal",
         })
 
     rows.sort(key=lambda r: (0 if r["fit"] == "High" else 1, -_safe_float(r.get("max_amount"), 0)))
-    return rows[:3]  # top 3 for concise UI
+    federal_rows = rows[:3]
+
+    state_rows: List[Dict[str, Any]] = []
+    if state:
+        state_rows.append(_state_portal_result(state))
+
+    return state_rows + federal_rows  # state first, then top federal matches
 
 
 def _append_payment_log_row(row: Dict[str, Any]) -> None:
@@ -525,70 +656,88 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
     pdf_path = os.path.join(PDF_DIR, f"{order_id}.pdf")
     c = canvas.Canvas(pdf_path, pagesize=letter)
 
-    # Header
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, 770, f"GrantforgeUSA | Draft ({_pdf_header_mode_note()})")
-    c.setFont("Helvetica", 10)
-    c.drawString(50, 755, f"Order: {order_id}")
-    c.drawString(50, 742, f"Created: {_now_utc()}")
+    left_margin = 54
+    right_margin = 558
+    top_y = 770
+    body_top_y = 720
+    bottom_margin = 60
+    line_width_chars = 98
 
-    # Body
-    y = 720
+    created_at = _now_utc()
+    page_num = 1
+
+    def draw_header() -> int:
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(left_margin, top_y, f"GrantforgeUSA | Draft ({_pdf_header_mode_note()})")
+        c.setFont("Helvetica", 10)
+        c.drawString(left_margin, top_y - 15, f"Order: {order_id}")
+        c.drawString(left_margin, top_y - 28, f"Created: {created_at}")
+        return body_top_y
+
+    def draw_footer():
+        c.setFont("Helvetica-Oblique", 9)
+        c.drawString(
+            left_margin,
+            bottom_margin - 12,
+            "Draft prepared using proprietary software. Review and edit before submission.",
+        )
+        c.drawRightString(right_margin, bottom_margin - 12, f"Page {page_num}")
+
+    def new_page() -> int:
+        nonlocal page_num
+        draw_footer()
+        c.showPage()
+        page_num += 1
+        return draw_header()
+
+    y = draw_header()
     c.setFont("Helvetica", 10)
+
+    def draw_section_header(title: str) -> int:
+        c.setFont("Helvetica-Bold", 11)
+        new_y = _wrap_draw_line(c, title, left_margin, y, width_chars=line_width_chars)
+        c.setFont("Helvetica", 10)
+        return new_y
+
+    def draw_line(text: str) -> int:
+        return _wrap_draw_line(c, text, left_margin, y, width_chars=line_width_chars)
 
     draft_body = payload.get("draft_body")
     if isinstance(draft_body, str) and draft_body.strip():
-        # Narrative first
-        c.setFont("Helvetica-Bold", 11)
-        y = _wrap_draw_line(c, "Draft Narrative", 50, y)
-        c.setFont("Helvetica", 10)
+        y = draw_section_header("Draft Narrative")
 
         for para in draft_body.split("\n\n"):
             for line in para.split("\n"):
-                if y < 60:
-                    c.showPage()
-                    y = 770
+                if y < bottom_margin:
+                    y = new_page()
+                if line.strip().endswith(":"):
+                    c.setFont("Helvetica-Bold", 10)
+                    y = _wrap_draw_line(c, line.strip(), left_margin, y, width_chars=line_width_chars)
                     c.setFont("Helvetica", 10)
-                y = _wrap_draw_line(c, line, 50, y)
-            y -= 6  # small extra spacing between paragraphs
+                else:
+                    y = _wrap_draw_line(c, line, left_margin, y, width_chars=line_width_chars)
+            y -= 8
 
-        # Order details
-        if y < 80:
-            c.showPage()
-            y = 770
-            c.setFont("Helvetica", 10)
+        if y < bottom_margin + 20:
+            y = new_page()
 
-        c.setFont("Helvetica-Bold", 11)
-        y = _wrap_draw_line(c, "Order Details", 50, y)
-        c.setFont("Helvetica", 10)
+        y = draw_section_header("Order Details")
 
         for k in sorted(payload.keys()):
             if k == "draft_body":
                 continue
             v = payload[k]
-            if y < 60:
-                c.showPage()
-                y = 770
-                c.setFont("Helvetica", 10)
-            y = _wrap_draw_line(c, f"{k}: {v}", 50, y)
+            if y < bottom_margin:
+                y = new_page()
+            y = draw_line(f"{k}: {v}")
     else:
-        # Legacy: just dump payload keys (should be rare now)
         for k in sorted(payload.keys()):
             v = payload[k]
-            if y < 60:
-                c.showPage()
-                y = 770
-                c.setFont("Helvetica", 10)
-            y = _wrap_draw_line(c, f"{k}: {v}", 50, y)
+            if y < bottom_margin:
+                y = new_page()
+            y = draw_line(f"{k}: {v}")
 
-    # Footer
-    if y < 80:
-        c.showPage()
-        y = 770
-        c.setFont("Helvetica", 10)
-
-    c.setFont("Helvetica-Oblique", 9)
-    c.drawString(50, 50, "Psalm 127:1 — Built with Faith. AI-generated draft; not an award or guarantee.")
+    draw_footer()
     c.save()
     return pdf_path
 
