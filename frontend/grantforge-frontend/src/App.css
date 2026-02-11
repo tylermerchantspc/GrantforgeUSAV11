@@ -130,6 +130,27 @@ textarea { min-height: 104px; resize: vertical; }
 
 .meta { color: var(--muted); margin-top: 4px; }
 
+
+.policy-note {
+  margin: 8px 0 12px;
+  color: #7c2d12;
+  font-weight: 700;
+}
+
+.results-group {
+  margin-top: 16px;
+}
+
+.results-group h4 {
+  margin: 12px 0 8px;
+}
+
+.results-group ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
 /* Larger screens: keep vertical form but tighten spacing; buttons can sit side-by-side if desired */
 @media (min-width: 640px) {
   .submit-btn, .back-btn { width: 100%; }
