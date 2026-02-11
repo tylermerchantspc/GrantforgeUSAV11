@@ -243,7 +243,7 @@ def _state_portal_result(state_abbrev: str) -> Dict[str, Any]:
             "program_url": portal["url"],
             "amount": "Varies",
             "deadline": "Varies",
-            "fit": "State",
+            "fit": "High",
             "fit_notes": f"Official state grants portal for {portal['name']}.",
             "requires_match_percent": 0,
             "max_amount": 0,
@@ -261,7 +261,7 @@ def _state_portal_result(state_abbrev: str) -> Dict[str, Any]:
         "program_url": search_url,
         "amount": "Varies",
         "deadline": "Varies",
-        "fit": "State",
+        "fit": "High",
         "fit_notes": "Search results focused on .gov grant and funding opportunities.",
         "requires_match_percent": 0,
         "max_amount": 0,
@@ -583,23 +583,17 @@ def _mk_evaluation_lines(audience: str) -> List[str]:
 
 def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     """
-    Build a structured narrative draft from intake + grant.
-    Used for both preview (shortened) and full paid draft PDF.
+    Build a consultant-style proposal draft from intake + selected opportunity.
     """
     org = (intake.get("organization") or "Your Organization").strip()
-    proj_title = (intake.get("projectTitle") or "Proposed initiative").strip()
-
-    # Clean audience so it doesn't end with a stray period
-    raw_audience = (intake.get("audience") or "").strip()
-    audience = raw_audience.rstrip(".").strip() or "participants"
-
-    # Clean timeline; avoid double periods when user types a full sentence
-    raw_timeline = (intake.get("timeline") or "TBA").strip()
-    timeline = raw_timeline.rstrip().rstrip(".")
-
-    notes = (intake.get("notes") or "").strip()
+    proj_title = (intake.get("projectTitle") or "Program Initiative").strip()
     category = (intake.get("category") or intake.get("who") or "organization").strip()
     state = (intake.get("state") or "").strip()
+    raw_audience = (intake.get("audience") or "").strip()
+    audience = raw_audience.rstrip(".").strip() or "participants"
+    raw_timeline = (intake.get("timeline") or "TBA").strip()
+    timeline = raw_timeline.rstrip().rstrip(".")
+    notes = (intake.get("notes") or "").strip()
 
     amount = _safe_float(intake.get("amountRequested"))
     annual_budget = _safe_float(intake.get("annualBudget"), 0)
@@ -615,128 +609,96 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     g_geo = (grant.get("geo_scope") or "").strip()
     g_url = grant_display_url(grant) if grant else ""
 
-    if amount > 0:
-        req_str = f"approximately ${amount:,.0f}"
-    else:
-        req_str = "a competitive grant amount aligned with program guidance"
-
-    if annual_budget > 0:
-        budget_str = f"with an estimated annual operating budget of ${annual_budget:,.0f}."
-    else:
-        budget_str = "with a modest operating budget and clear stewardship of funds."
-
-    focus_str = keywords_str or "addressing clearly documented local needs"
-    tag_phrase = ", ".join(g_tags[:4]) if g_tags else "the funder’s stated priorities"
-
-    # Region / scope note
-    region_bits = []
-    if g_geo:
-        region_bits.append(f"This opportunity is described as serving the {g_geo} region.")
-    if state:
-        region_bits.append(f"The applicant is based in {state}.")
-    region_note = " ".join(region_bits)
-
-    # Objectives & evaluation
-    objectives = _mk_objectives_from_keywords(kws, audience)
-    evaluation = _mk_evaluation_lines(audience)
-
-    # 1) Executive Summary
-    p1 = (
-        f"{org} proposes “{proj_title}” to support {audience} through activities focused on {focus_str}. "
-        f"The project will request {req_str} under the {g_title} opportunity, "
+    req_str = f"${amount:,.0f}" if amount > 0 else "a right-sized request"
+    budget_str = (
+        f"${annual_budget:,.0f} annual operating budget" if annual_budget > 0
+        else "a disciplined operating budget"
     )
+    focus_str = keywords_str or "identified community priorities"
+    tag_phrase = ", ".join(g_tags[:5]) if g_tags else "the funder's published priorities"
 
-    if timeline and timeline.lower() != "tba":
-        # If user wrote a full sentence, keep it; otherwise treat as a phrase.
-        if any(ch in raw_timeline for ch in ".!?"):
-            p1 += f"{timeline} "
-        else:
-            p1 += f"with an implementation timeline of {timeline}. "
-    else:
-        p1 += "The implementation timeline will be finalized with the funder’s guidance. "
+    region_note = []
+    if state:
+        region_note.append(f"The applicant is located in {state}.")
+    if g_geo:
+        region_note.append(f"The opportunity indicates a {g_geo} geographic focus.")
+    region_text = " ".join(region_note)
 
-    p1 += f"The applicant currently operates as {category} {budget_str}"
-    if region_note:
-        p1 += " " + region_note
-
-    # 2) Need Statement
-    if notes:
-        need_body = notes
-    else:
-        need_body = (
-            f"The target population faces barriers related to limited access to high-quality resources, "
-            f"programming, and supports. Without targeted investment, {audience} are less likely to "
-            f"receive consistent, structured services that improve outcomes over time."
-        )
-    p2 = "There is a clear documented need for this project. " + need_body
-
-    # 3) Objectives
+    objectives = _mk_objectives_from_keywords(kws, audience)
     if not objectives:
         objectives = [
-            "Increase access to high-quality programming connected to the grant’s priorities.",
-            "Improve participant engagement and measurable outcomes over the project period.",
-            "Strengthen the applicant’s capacity to sustain successful activities beyond the grant term.",
+            f"Increase program participation among {audience} by at least 20% over the project period.",
+            "Demonstrate measurable growth using pre/post outcomes linked to each service component.",
+            "Document delivery quality through regular implementation reviews and corrective actions.",
+            "Strengthen long-term delivery capacity through staff training and partner coordination.",
         ]
 
-    obj_lines = []
-    for i, line in enumerate(objectives, 1):
-        obj_lines.append(f"{i}. {line}")
-    p3 = "Objectives and Measurable Outcomes:\n" + "\n".join(obj_lines)
+    eval_lines = _mk_evaluation_lines(audience)
 
-    # 4) Key Activities
-    act_lines = [
-        "Design and deliver structured sessions aligned to clear lesson or activity plans.",
-        "Coordinate staffing, scheduling, and communication with participating stakeholders.",
-        "Integrate family, community, or partner engagement where appropriate.",
+    s1 = (
+        "Executive Summary:\n"
+        f"{org} respectfully submits this proposal for \"{proj_title}\" under {g_title}"
+        f"{f' (Grant # {g_number})' if g_number else ''}. "
+        f"The project is designed to serve {audience} through a targeted strategy focused on {focus_str}. "
+        f"The applicant seeks {req_str}, paired with {budget_str}, to implement a sequenced, accountable program model. "
+        f"{region_text}"
+    )
+
+    s2 = (
+        "Organizational Background and Context:\n"
+        f"As a {category}, {org} maintains an operational posture centered on stewardship, compliance, and outcomes. "
+        "The organization has structured planning and oversight practices that support responsible grant execution, "
+        "including procurement controls, documentation standards, and periodic performance reviews. "
+        "This application advances a practical, implementation-ready plan rather than a conceptual request."
+    )
+
+    need_body = notes or (
+        f"Current demand among {audience} exceeds available service capacity, particularly in priority areas tied to {focus_str}. "
+        "Without dedicated investment, beneficiaries face inconsistent access to high-quality programming and supports."
+    )
+    s3 = "Statement of Need:\n" + need_body
+
+    obj_lines = "\n".join(f"{i}. {line}" for i, line in enumerate(objectives[:4], 1))
+    s4 = "Project Objectives and Measurable Outcomes:\n" + obj_lines
+
+    plan_lines = [
+        "Launch implementation with a clear startup schedule, internal milestones, and responsible leads.",
+        "Deploy direct services aligned to evidence-informed practices and funder guidance.",
+        "Coordinate partners, participants, and stakeholders through consistent communication protocols.",
+        "Maintain documented controls for fiscal management, inventory, and allowable-cost tracking.",
     ]
-    if "after-school" in keywords_str.lower() or "afterschool" in keywords_str.lower():
-        act_lines.append("Offer after-school programming with safe supervision, enrichment, and academic support.")
-    if "stem" in keywords_str.lower() or "robotics" in keywords_str.lower():
-        act_lines.append("Implement hands-on STEM/robotics activities that build problem-solving and teamwork skills.")
-    p4 = "Implementation Strategy:\n" + "\n".join(f"- {l}" for l in act_lines)
+    if timeline and timeline.lower() != "tba":
+        plan_lines.append(f"Primary timeline commitment: {timeline}.")
+    s5 = "Project Plan and Implementation Framework:\n" + "\n".join(f"- {l}" for l in plan_lines)
 
-    # 5) Budget Summary
     budget_lines = [
-        "Grant funds will be used for allowable costs such as materials, supplies, limited equipment, and staffing.",
-        "The applicant will follow all federal, state, and local procurement and fiscal accountability requirements.",
+        "Funds will be directed to allowable costs, including program materials, supplies, limited equipment, and staffing support.",
+        "The applicant will apply federal, state, and local fiscal controls for expenditure authorization and audit readiness.",
     ]
     if g_match > 0:
-        budget_lines.append(
-            f"The applicant will plan to meet the required {g_match}% match through eligible in-kind or cash contributions, as confirmed with the funder’s guidance."
-        )
+        budget_lines.append(f"The applicant will satisfy the approximate {g_match}% match requirement through eligible cash and/or in-kind contributions.")
     if g_max > 0 and amount > 0:
-        budget_lines.append(
-            f"The requested amount of {req_str} is being scoped with awareness of the program’s published range (up to approximately ${g_max:,.0f}, as applicable)."
-        )
-    p5 = "Budget Narrative and Stewardship Plan:\n" + "\n".join(f"- {l}" for l in budget_lines)
+        budget_lines.append(f"The request of {req_str} is calibrated within the program's published ceiling (up to about ${g_max:,.0f}).")
+    s6 = "Budget Narrative and Financial Controls:\n" + "\n".join(f"- {l}" for l in budget_lines)
 
-    # 6) Evaluation Plan
-    eval_lines = []
-    for i, line in enumerate(evaluation, 1):
-        eval_lines.append(f"{i}. {line}")
-    p6 = "Evaluation and Continuous Improvement Plan:\n" + "\n".join(eval_lines)
-
-    # 7) Alignment with Funder Priorities
-    align_text = (
-        f"This project aligns with {g_title} by advancing activities related to {tag_phrase}. "
-        f"All proposed activities and costs will adhere to program guidance, applicable regulations, "
-        f"and ethical standards. The applicant understands that this draft is a starting point and will "
-        f"review, refine, and customize language prior to any final submission."
-    )
-    deadline_note = f"The current anticipated deadline in this draft is {g_deadline}."
-    grant_no_note = f" Grant #: {g_number}." if g_number else ""
-    url_note = ""
-    if g_url:
-        url_note = f" The funder’s official information or search page for this opportunity can be accessed on Grants.gov at: {g_url}."
-
-    compliance_note = (
-        " Before submitting, the applicant will re-verify eligibility, deadlines, required forms, "
-        "and match expectations using the official funding notice on Grants.gov or the funder’s website."
+    eval_text = "\n".join(f"{i}. {line}" for i, line in enumerate(eval_lines, 1))
+    s7 = (
+        "Evaluation, Reporting, and Continuous Improvement:\n"
+        + eval_text + "\n"
+        + "Findings will be reviewed at scheduled checkpoints to support timely corrective actions and transparent reporting."
     )
 
-    p7 = align_text + grant_no_note + " " + deadline_note + url_note + compliance_note
+    s8 = (
+        "Sustainability and Strategic Alignment:\n"
+        f"This initiative advances {tag_phrase} and strengthens institutional capacity beyond the grant period. "
+        "Successful components will be incorporated into ongoing operations through phased budgeting, partner commitments, "
+        "and replicable implementation procedures. "
+        f"Current deadline reference: {g_deadline}."
+        + (f" Official opportunity details: {g_url}." if g_url else "")
+        + " All final submission materials will be validated against the official funding notice before filing."
+    )
 
-    return "\n\n".join([p1, p2, p3, p4, p5, p6, p7])
+    return "\n\n".join([s1, s2, s3, s4, s5, s6, s7, s8])
 
 
 def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
@@ -775,25 +737,26 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
             return body_top_y - 14
         return body_top_y
 
-    def draw_footer():
+    def draw_footer(include_disclaimer: bool = False):
         c.setFont("Helvetica-Oblique", 8)
         c.drawString(left_margin, 50, "Prepared with proprietary matching and drafting system.")
         c.drawRightString(right_margin, 50, f"Page {page_num}")
-        c.setFont("Times-Roman", 7)
-        y = 39
-        text = legal_disclaimer
-        while text:
-            chunk = text[:140]
-            text = text[140:]
-            c.drawString(left_margin, y, chunk)
-            y -= 7
-            if y < 16:
-                break
-        c.drawString(left_margin, 16, "All sales are final. No refunds.")
+        if include_disclaimer:
+            c.setFont("Times-Roman", 7)
+            y = 39
+            text = legal_disclaimer
+            while text:
+                chunk = text[:140]
+                text = text[140:]
+                c.drawString(left_margin, y, chunk)
+                y -= 7
+                if y < 16:
+                    break
+            c.drawString(left_margin, 16, "This draft is for informational purposes only and does not constitute legal or financial advice. All sales are final; no refunds.")
 
     def new_page() -> int:
         nonlocal page_num
-        draw_footer()
+        draw_footer(include_disclaimer=False)
         c.showPage()
         page_num += 1
         return draw_header()
@@ -849,7 +812,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
                 continue
             draw_block_line(f"{k}: {payload[k]}")
 
-    draw_footer()
+    draw_footer(include_disclaimer=True)
     c.save()
     return pdf_path
 
