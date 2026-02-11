@@ -414,14 +414,14 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     amount = _safe_float(payload.get("amountRequested"))
     kws = _norm_words(payload.get("keywords", ""))
     state = (payload.get("state") or "").strip()
-    include_expired = bool(payload.get("includeExpired"))
+    include_expired = payload.get("includeExpired", False)
 
     rows = []
     all_scored_rows = []
     for gr in grants:
         expired = _is_expired(gr.get("deadline", ""))
-        if include_expired is False and expired:
-            pass
+        if not include_expired and expired:
+            continue
 
         s = score_grant(gr, category, kws, amount, state)
 
