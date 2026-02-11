@@ -640,7 +640,7 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
         f"{org} respectfully submits this proposal for \"{proj_title}\" under {g_title}"
         f"{f' (Grant # {g_number})' if g_number else ''}. "
         f"The project is designed to serve {audience} through a targeted strategy focused on {focus_str}. "
-        f"The applicant seeks {req_str}, paired with {budget_str}, to implement a sequenced, accountable program model. "
+        f"The applicant seeks {req_str}, paired with {budget_str}, to implement a sequenced, accountable program framework. "
         f"{region_text}"
     )
 
