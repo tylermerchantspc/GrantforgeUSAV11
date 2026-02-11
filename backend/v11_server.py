@@ -253,7 +253,7 @@ def _state_portal_result(state_abbrev: str) -> Dict[str, Any]:
             "level": "State",
         }
 
-    query = f"{state_name} site:.gov grants funding opportunities".strip()
+    query = f"{state_name} site:.gov grants portal".strip()
     search_url = f"https://search.usa.gov/search?query={query.replace(' ', '%20')}"
     return {
         "title": f"State Grants Portal Search — {state_name}",
@@ -262,7 +262,7 @@ def _state_portal_result(state_abbrev: str) -> Dict[str, Any]:
         "amount": "Varies",
         "deadline": "Varies",
         "fit": "High",
-        "fit_notes": "Search results focused on .gov grant and funding opportunities.",
+        "fit_notes": "Search results focused on .gov grants portal resources.",
         "requires_match_percent": 0,
         "max_amount": 0,
         "tags": ["State grants", state_name],
