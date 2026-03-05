@@ -5,11 +5,25 @@
     "deadline": "2025-12-31",
     "min_amount": 5000,
     "max_amount": 500000,
-    "eligible_types": ["municipality", "city", "county", "local government", "tribal", "501", "nonprofit", "community development"],
-    "eligible_states": ["AL","AR","GA","KY","LA","MS","NC","SC","TN","VA","WV"],
-    "tags": ["community", "infrastructure", "housing", "revitalization"],
+    "eligible_types": [
+      "municipality",
+      "city",
+      "county",
+      "local government",
+      "tribal",
+      "501",
+      "nonprofit",
+      "community development"
+    ],
+    "tags": [
+      "community",
+      "infrastructure",
+      "housing",
+      "revitalization"
+    ],
     "requires_match_percent": 10,
-    "geo_scope": "South"
+    "geo_scope": "South",
+    "opportunity_id": "GFUSA-1001"
   },
   {
     "title": "Safe Streets and Roads for All (SS4A)",
@@ -17,35 +31,69 @@
     "deadline": "2026-01-15",
     "min_amount": 25000,
     "max_amount": 200000,
-    "eligible_types": ["municipality", "city", "county", "transportation", "public works"],
-    "eligible_states": ["NY","NJ","PA","CT","MA","RI","NH","VT","ME"],
-    "tags": ["transportation", "safety", "infrastructure", "vision zero"],
+    "eligible_types": [
+      "municipality",
+      "city",
+      "county",
+      "transportation",
+      "public works"
+    ],
+    "tags": [
+      "transportation",
+      "safety",
+      "infrastructure",
+      "vision zero"
+    ],
     "requires_match_percent": 20,
-    "geo_scope": "Northeast"
+    "geo_scope": "Northeast",
+    "opportunity_id": "GFUSA-1002"
   },
   {
-    "title": "Small Business Innovation Research (SBIR) – Starter",
+    "title": "Small Business Innovation Research (SBIR) \u2013 Starter",
     "program_url": "https://www.grants.gov/search-grants?keywords=Small%20Business%20Innovation%20Research%20SBIR",
     "deadline": "2026-03-31",
     "min_amount": 15000,
     "max_amount": 75000,
-    "eligible_types": ["small business", "startup", "for-profit", "smb", "microenterprise"],
-    "eligible_states": ["TX","OK","NM","CO","AZ","NV","UT"],
-    "tags": ["innovation", "technology", "prototype", "R&D"],
+    "eligible_types": [
+      "small business",
+      "startup",
+      "for-profit",
+      "smb",
+      "microenterprise"
+    ],
+    "tags": [
+      "innovation",
+      "technology",
+      "prototype",
+      "R&D"
+    ],
     "requires_match_percent": 10,
-    "geo_scope": "Southwest"
+    "geo_scope": "Southwest",
+    "opportunity_id": "GFUSA-1003"
   },
   {
-    "title": "USDA ReConnect – Rural Broadband",
+    "title": "USDA ReConnect \u2013 Rural Broadband",
     "program_url": "https://www.grants.gov/search-grants?keywords=USDA%20ReConnect%20rural%20broadband",
     "deadline": "2026-04-30",
     "min_amount": 20000,
     "max_amount": 250000,
-    "eligible_types": ["municipality", "county", "cooperative", "utility", "telecom", "nonprofit"],
-    "eligible_states": ["MT","ND","SD","WY","NE","KS","CO","ID","NM"],
-    "tags": ["rural", "internet", "infrastructure", "technology"],
+    "eligible_types": [
+      "municipality",
+      "county",
+      "cooperative",
+      "utility",
+      "telecom",
+      "nonprofit"
+    ],
+    "tags": [
+      "rural",
+      "internet",
+      "infrastructure",
+      "technology"
+    ],
     "requires_match_percent": 15,
-    "geo_scope": "West"
+    "geo_scope": "West",
+    "opportunity_id": "GFUSA-1004"
   },
   {
     "title": "21st Century Community Learning Centers (After-School)",
@@ -53,35 +101,73 @@
     "deadline": "2025-12-15",
     "min_amount": 5000,
     "max_amount": 30000,
-    "eligible_types": ["501", "nonprofit", "school", "district", "community organization", "youth center"],
-    "eligible_states": ["MN","IA","WI","IL","MI","ND","SD","NE","KS","MO"],
-    "tags": ["education", "youth", "after-school", "tutoring", "mentorship"],
+    "eligible_types": [
+      "501",
+      "nonprofit",
+      "school",
+      "district",
+      "community organization",
+      "youth center"
+    ],
+    "tags": [
+      "education",
+      "youth",
+      "after-school",
+      "tutoring",
+      "mentorship"
+    ],
     "requires_match_percent": 0,
-    "geo_scope": "Midwest"
+    "geo_scope": "Midwest",
+    "opportunity_id": "GFUSA-1005"
   },
   {
-    "title": "Perkins V – CTE Equipment & Pathways",
+    "title": "Perkins V \u2013 CTE Equipment & Pathways",
     "program_url": "https://www.grants.gov/search-grants?keywords=Perkins%20V%20career%20technical%20education",
     "deadline": "2025-12-20",
     "min_amount": 10000,
     "max_amount": 60000,
-    "eligible_types": ["school", "district", "k12", "technical center", "vocational school", "cte program"],
-    "eligible_states": ["OH","IN","IL","WI","MN","IA","MI","MO"],
-    "tags": ["CTE", "equipment", "workforce", "career training"],
+    "eligible_types": [
+      "school",
+      "district",
+      "k12",
+      "technical center",
+      "vocational school",
+      "cte program"
+    ],
+    "tags": [
+      "CTE",
+      "equipment",
+      "workforce",
+      "career training"
+    ],
     "requires_match_percent": 5,
-    "geo_scope": "Great Lakes"
+    "geo_scope": "Great Lakes",
+    "opportunity_id": "GFUSA-1006"
   },
   {
-    "title": "Faith & Neighborhood Partnerships – Outreach Microgrants",
+    "title": "Faith & Neighborhood Partnerships \u2013 Outreach Microgrants",
     "program_url": "https://www.grants.gov/search-grants?keywords=faith%20based%20community%20outreach%20microgrant",
     "deadline": "2026-02-28",
     "min_amount": 1000,
     "max_amount": 10000,
-    "eligible_types": ["church", "faith", "faith-based", "ministry", "501", "community outreach"],
-    "eligible_states": ["VA","MD","DC","PA","DE","WV","NC"],
-    "tags": ["outreach", "food", "shelter", "community", "assistance"],
+    "eligible_types": [
+      "church",
+      "faith",
+      "faith-based",
+      "ministry",
+      "501",
+      "community outreach"
+    ],
+    "tags": [
+      "outreach",
+      "food",
+      "shelter",
+      "community",
+      "assistance"
+    ],
     "requires_match_percent": 0,
-    "geo_scope": "Mid-Atlantic"
+    "geo_scope": "Mid-Atlantic",
+    "opportunity_id": "GFUSA-1007"
   },
   {
     "title": "Classroom Supplies & Mini-Equipment (Teacher Microgrant)",
@@ -89,10 +175,23 @@
     "deadline": "2026-01-31",
     "min_amount": 300,
     "max_amount": 2000,
-    "eligible_types": ["teacher", "educator", "classroom", "school"],
-    "tags": ["classroom", "supplies", "materials", "technology", "mini-grant", "teacher"],
+    "eligible_types": [
+      "teacher",
+      "educator",
+      "classroom",
+      "school"
+    ],
+    "tags": [
+      "classroom",
+      "supplies",
+      "materials",
+      "technology",
+      "mini-grant",
+      "teacher"
+    ],
     "requires_match_percent": 0,
-    "geo_scope": "US"
+    "geo_scope": "US",
+    "opportunity_id": "GFUSA-1008"
   },
   {
     "title": "STEM Classroom Innovation (Teacher-Led)",
@@ -100,9 +199,23 @@
     "deadline": "2025-12-20",
     "min_amount": 1000,
     "max_amount": 15000,
-    "eligible_types": ["teacher", "educator", "classroom", "school", "district"],
-    "tags": ["STEM", "education", "classroom", "technology", "innovation", "teacher"],
+    "eligible_types": [
+      "teacher",
+      "educator",
+      "classroom",
+      "school",
+      "district"
+    ],
+    "tags": [
+      "STEM",
+      "education",
+      "classroom",
+      "technology",
+      "innovation",
+      "teacher"
+    ],
     "requires_match_percent": 0,
-    "geo_scope": "US"
+    "geo_scope": "US",
+    "opportunity_id": "GFUSA-1009"
   }
 ]

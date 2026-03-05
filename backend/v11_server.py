@@ -134,12 +134,8 @@ def _is_expired(deadline_str: str) -> bool:
 
 
 def fallback_grants_gov_url(title: str, tags: List[str]) -> str:
-    """
-    Build a Grants.gov search URL using title + tags.
-    If your grants.json has a direct funding-opportunity URL, that will be used instead.
-    """
-    q = "+".join(_norm_words(title)[:6] + [t.lower() for t in (tags or [])][:4])
-    return f"https://www.grants.gov/search-grants?keywords={q}"
+    """Fallback to Grants.gov listings page when no direct opportunity ID is available."""
+    return ""
 
 
 # -------- URL normalizer (force Grants.gov or fallback to its search) --------
@@ -157,10 +153,6 @@ def grant_display_url(gr: Dict[str, Any]) -> str:
       2) details endpoint built from opportunity ID/number
       3) grants.gov search URL
     """
-    raw = gr.get("funding_url") or gr.get("program_url") or ""
-    if isinstance(raw, str) and raw.startswith(("http://", "https://")) and "grants.gov" in raw:
-        return raw
-
     opp_id = str(
         gr.get("opportunity_id")
         or gr.get("oppId")
@@ -180,6 +172,10 @@ def grant_display_url(gr: Dict[str, Any]) -> str:
         if opp_number:
             query += f"&oppNumber={opp_number}"
         return f"https://www.grants.gov/grantsws/rest/opportunities/details?{query}"
+
+    raw = gr.get("funding_url") or gr.get("program_url") or ""
+    if isinstance(raw, str) and raw.startswith(("http://", "https://")) and "grants.gov" in raw and "search-grants" not in raw:
+        return raw
 
     return fallback_grants_gov_url(gr.get("title", ""), gr.get("tags", []) or [])
 
@@ -282,11 +278,15 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
     return {"score": score, "fit": fit, "fit_notes": " ".join(fit_notes)}
 
 
-def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     """
     Turn intake into 0–3 strong matches from backend/data/grants.json.
     Data quality lives in grants.json; logic lives here.
     """
+    payload = dict(payload or {})
+    payload.pop("state", None)
+    payload.pop("eligible_state", None)
+
     grants = _read_json(GRANTS_PATH) or []
     category = payload.get("category") or payload.get("who") or ""
     amount = _safe_float(payload.get("amountRequested"))
@@ -296,7 +296,7 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows = []
     expired_rows = []
     internet_terms = {
-        "internet", "connectivity", "broadband", "wifi", "wi-fi", "hotspot", "network",
+        "internet", "connectivity", "wifi", "wi-fi", "network",
     }
     infra_exclude_tags = {
         "broadband", "telecom", "telecommunications", "infrastructure", "fiber", "utilities",
@@ -344,6 +344,7 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows.sort(key=lambda r: (_safe_float(r.get("score"), 0), _safe_float(r.get("max_amount"), 0)), reverse=True)
 
     strong_rows = [r for r in rows if r.get("fit") in ("High", "Medium")]
+    has_strong_matches = len(strong_rows) > 0
     if len(strong_rows) >= 3:
         federal_rows = strong_rows[:3]
     else:
@@ -364,7 +365,7 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             if len(federal_rows) >= 3:
                 break
 
-    return federal_rows
+    return federal_rows, has_strong_matches
 
 
 def _append_payment_log_row(row: Dict[str, Any]) -> None:
@@ -453,6 +454,10 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     Build a structured narrative draft from intake + grant.
     Used for both preview (shortened) and full paid draft PDF.
     """
+    intake = dict(intake or {})
+    intake.pop("state", None)
+    intake.pop("eligible_state", None)
+
     org = _organization_name(intake)
     proj_title = (intake.get("projectTitle") or "Proposed initiative").strip()
 
@@ -634,7 +639,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
         c.drawString(
             left_margin,
             bottom_margin - 12,
-            "Draft prepared using proprietary software. Review and edit before submission.",
+            "Draft prepared using proprietary software. Review and edit before submission. All sales final. No refunds.",
         )
         c.drawRightString(right_margin, bottom_margin - 12, f"Page {page_num}")
 
@@ -762,8 +767,11 @@ def questionnaire():
         return jsonify(ok=False, error="Invalid JSON"), 400
 
     org = _organization_name(data)
-    results = shortlist(data)
-    return jsonify(ok=True, organization=org, results=results)
+    results, has_strong_matches = shortlist(data)
+    notice = ""
+    if not has_strong_matches and results:
+        notice = "No direct federal matches found. Showing closest opportunities."
+    return jsonify(ok=True, organization=org, results=results, notice=notice)
 
 
 @app.post("/search")
@@ -781,7 +789,7 @@ def preview():
 
     grant = data.get("grant") or {}
     if not grant:
-        short = shortlist(data)
+        short, _ = shortlist(data)
         if short:
             grant = short[0]
 
@@ -803,6 +811,10 @@ def create_checkout_session():
         data = request.get_json(force=True) or {}
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
+
+    data = dict(data or {})
+    data.pop("state", None)
+    data.pop("eligible_state", None)
 
     org = _organization_name(data, default="Customer")
     category = (data.get("category") or data.get("who") or "Other").strip()
@@ -843,7 +855,10 @@ def create_checkout_session():
         "grant_program": grant.get("program", ""),
         "grant_deadline": grant.get("deadline", ""),
         "grant_url": grant_url,
+        "projectTitle": (data.get("projectTitle") or "").strip(),
+        "keywords": (data.get("keywords") or "").strip(),
         "price": f"{price:.2f}",
+        "refund_policy": "All sales final. No refunds.",
         "app_mode": APP_MODE,
     }
 
