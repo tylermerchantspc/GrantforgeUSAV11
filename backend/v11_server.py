@@ -3,7 +3,7 @@
 #          REAL narrative draft generation, reliable PDF download
 #          (eager + webhook), contextual previews, and debug utilities.
 
-import os, json, glob
+import os, json, glob, re
 from datetime import datetime, date
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -42,11 +42,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 
 # Pricing
-BASE_PRICE = 49.99
-TEACHER_PRICE = 9.99
-SMALL_PRICE = 49.99
-MEDIUM_PRICE = 99.99
-LARGE_PRICE = 199.99
+FLAT_PRICE = 2500.00
 
 # ---------------- Flask app ----------------
 app = Flask(__name__)
@@ -82,75 +78,43 @@ def _norm_words(s: str) -> List[str]:
     return [w.strip().lower() for w in (s or "").replace(",", " ").split() if w.strip()]
 
 
+def _normalize_keyword_token(token: str) -> str:
+    t = (token or "").strip().lower()
+    if not t:
+        return ""
+    t = re.sub(r"\btitle\s*(?:i|1)\b", "titlei", t)
+    t = re.sub(r"\bk\s*[- ]?\s*12\b", "k12", t)
+    t = re.sub(r"\bell\b", "englishlearners", t)
+    t = re.sub(r"\bsped\b", "specialeducation", t)
+    t = t.replace("-", " ")
+    t = " ".join(t.split())
+    return t
+
+
+def normalized_keywords(raw_keywords: str) -> List[str]:
+    normalized = []
+    for w in _norm_words(raw_keywords or ""):
+        n = _normalize_keyword_token(w)
+        if n and n not in normalized:
+            normalized.append(n)
+    return normalized
+
+
+def _organization_name(payload: Dict[str, Any], default: str = "Your Organization") -> str:
+    return (
+        payload.get("organization")
+        or payload.get("organization_name")
+        or payload.get("org")
+        or default
+    ).strip()
+
+
 def _safe_float(x, default=0.0) -> float:
     try:
         return float(x)
     except Exception:
         return default
 
-
-STATE_NAME_BY_ABBR = {
-    "AL": "Alabama",
-    "AK": "Alaska",
-    "AZ": "Arizona",
-    "AR": "Arkansas",
-    "CA": "California",
-    "CO": "Colorado",
-    "CT": "Connecticut",
-    "DE": "Delaware",
-    "DC": "District of Columbia",
-    "FL": "Florida",
-    "GA": "Georgia",
-    "HI": "Hawaii",
-    "ID": "Idaho",
-    "IL": "Illinois",
-    "IN": "Indiana",
-    "IA": "Iowa",
-    "KS": "Kansas",
-    "KY": "Kentucky",
-    "LA": "Louisiana",
-    "ME": "Maine",
-    "MD": "Maryland",
-    "MA": "Massachusetts",
-    "MI": "Michigan",
-    "MN": "Minnesota",
-    "MS": "Mississippi",
-    "MO": "Missouri",
-    "MT": "Montana",
-    "NE": "Nebraska",
-    "NV": "Nevada",
-    "NH": "New Hampshire",
-    "NJ": "New Jersey",
-    "NM": "New Mexico",
-    "NY": "New York",
-    "NC": "North Carolina",
-    "ND": "North Dakota",
-    "OH": "Ohio",
-    "OK": "Oklahoma",
-    "OR": "Oregon",
-    "PA": "Pennsylvania",
-    "RI": "Rhode Island",
-    "SC": "South Carolina",
-    "SD": "South Dakota",
-    "TN": "Tennessee",
-    "TX": "Texas",
-    "UT": "Utah",
-    "VT": "Vermont",
-    "VA": "Virginia",
-    "WA": "Washington",
-    "WV": "West Virginia",
-    "WI": "Wisconsin",
-    "WY": "Wyoming",
-}
-
-
-STATE_PORTALS = {
-    "MN": {
-        "name": "Minnesota",
-        "url": "https://mn.gov/admin/citizen/grants/",
-        "label": "Minnesota Grants Portal",
-    },
-}
 
 
 def _deadline_ok(deadline_str: str) -> bool:
@@ -187,11 +151,37 @@ def _ensure_http_url(url: str, title: str, tags: List[str]) -> str:
 
 def grant_display_url(gr: Dict[str, Any]) -> str:
     """
-    Single place to decide which URL we treat as the 'official' link.
-    If you later add 'funding_url' or similar to grants.json, prefer it here.
+    Prefer direct Grants.gov opportunity links when possible.
+    Fallback order:
+      1) funding_url/program_url if valid grants.gov URL
+      2) details endpoint built from opportunity ID/number
+      3) grants.gov search URL
     """
     raw = gr.get("funding_url") or gr.get("program_url") or ""
-    return _ensure_http_url(raw, gr.get("title", ""), gr.get("tags", []) or [])
+    if isinstance(raw, str) and raw.startswith(("http://", "https://")) and "grants.gov" in raw:
+        return raw
+
+    opp_id = str(
+        gr.get("opportunity_id")
+        or gr.get("oppId")
+        or gr.get("opp_id")
+        or gr.get("program_id")
+        or ""
+    ).strip()
+    opp_number = str(
+        gr.get("opportunity_number")
+        or gr.get("oppNumber")
+        or gr.get("opp_number")
+        or ""
+    ).strip()
+
+    if opp_id or opp_number:
+        query = f"oppId={opp_id or opp_number}"
+        if opp_number:
+            query += f"&oppNumber={opp_number}"
+        return f"https://www.grants.gov/grantsws/rest/opportunities/details?{query}"
+
+    return fallback_grants_gov_url(gr.get("title", ""), gr.get("tags", []) or [])
 
 
 def _pdf_header_mode_note() -> str:
@@ -211,61 +201,8 @@ def _wrap_draw_line(c: canvas.Canvas, text: str, start_x: int, y: int, width_cha
     return y - 14
 
 
-def _state_full_name(state_abbrev: str) -> str:
-    return STATE_NAME_BY_ABBR.get((state_abbrev or "").upper(), "")
-
-
-def _state_search_terms(state_abbrev: str) -> List[str]:
-    abbr = (state_abbrev or "").upper()
-    full = _state_full_name(abbr)
-    return [t.lower() for t in (abbr, full) if t]
-
-
-def _state_portal_result(state_abbrev: str) -> Dict[str, Any]:
-    abbr = (state_abbrev or "").upper()
-    state_name = _state_full_name(abbr) or abbr
-    portal = STATE_PORTALS.get(abbr)
-    if portal:
-        return {
-            "title": portal["label"],
-            "program": "state-portal",
-            "program_url": portal["url"],
-            "amount": "Varies",
-            "deadline": "Varies",
-            "fit": "State",
-            "fit_notes": f"Official state grants portal for {portal['name']}.",
-            "requires_match_percent": 0,
-            "max_amount": 0,
-            "tags": ["State grants", portal["name"]],
-            "level": "State",
-        }
-
-    query = f"{state_name} state grants portal".strip()
-    search_url = f"https://search.usa.gov/search?query={query.replace(' ', '%20')}"
-    return {
-        "title": f"State Grants Portal Search — {state_name}",
-        "program": "state-portal-search",
-        "program_url": search_url,
-        "amount": "Varies",
-        "deadline": "Varies",
-        "fit": "State",
-        "fit_notes": "Search results for state grants portals and official listings.",
-        "requires_match_percent": 0,
-        "max_amount": 0,
-        "tags": ["State grants", state_name],
-        "level": "State",
-    }
-
-
 def price_for(category: str, annual_budget: float) -> float:
-    c = (category or "").lower()
-    if c.startswith("teacher"):
-        return TEACHER_PRICE
-    if annual_budget <= 500_000:
-        return SMALL_PRICE
-    if annual_budget <= 2_000_000:
-        return MEDIUM_PRICE
-    return LARGE_PRICE
+    return FLAT_PRICE
 
 
 def fraud_check(category: str, amount: float) -> Dict[str, Any]:
@@ -294,7 +231,7 @@ def fraud_check(category: str, amount: float) -> Dict[str, Any]:
     return {"ok": True, "msg": ""}
 
 
-def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float, state: str) -> Dict[str, Any]:
+def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float) -> Dict[str, Any]:
     """
     Compute a score + qualitative fit and human-readable notes.
     Goal: more 'true' shortlisting based on your internal grants.json.
@@ -322,7 +259,7 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
         score += 2
 
     # keywords vs tags
-    tags = [t.lower() for t in gr.get("tags", [])]
+    tags = [_normalize_keyword_token(t) for t in gr.get("tags", [])]
     overlap = set(kws) & set(tags)
     if overlap:
         score += min(len(overlap), 3)  # up to +3
@@ -335,29 +272,6 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
         score += 1
     else:
         fit_notes.append("Deadline has passed.")
-
-    # state/region (if data present)
-    states = [s.lower() for s in gr.get("eligible_states", [])]
-    if states:
-        if state and state.lower() in states:
-            score += 1
-            fit_notes.append(f"Applicant state appears within eligible states ({state}).")
-        else:
-            fit_notes.append("Applicant state may not be explicitly listed as eligible.")
-
-    # state relevance boost using abbreviation + full name
-    state_terms = _state_search_terms(state)
-    if state_terms:
-        search_blob = " ".join([
-            str(gr.get("title", "")),
-            str(gr.get("program", "")),
-            str(gr.get("program_id", "")),
-            str(gr.get("geo_scope", "")),
-            " ".join(gr.get("tags", []) or []),
-        ]).lower()
-        if any(term in search_blob for term in state_terms):
-            score += 1
-            fit_notes.append("Opportunity text references the applicant’s state.")
 
     # match % note
     req_match = int(gr.get("requires_match_percent", 0) or 0)
@@ -376,43 +290,81 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     grants = _read_json(GRANTS_PATH) or []
     category = payload.get("category") or payload.get("who") or ""
     amount = _safe_float(payload.get("amountRequested"))
-    kws = _norm_words(payload.get("keywords", ""))
-    state = (payload.get("state") or "").strip()
+    kws = normalized_keywords(payload.get("keywords", ""))
     include_expired = bool(payload.get("includeExpired"))  # default hides expired
 
     rows = []
+    expired_rows = []
+    internet_terms = {
+        "internet", "connectivity", "broadband", "wifi", "wi-fi", "hotspot", "network",
+    }
+    infra_exclude_tags = {
+        "broadband", "telecom", "telecommunications", "infrastructure", "fiber", "utilities",
+    }
+    school_or_district = "school" in category.lower() or "district" in category.lower()
+    kws_lc = {k.lower() for k in kws}
+    has_connectivity_need = any(k in internet_terms for k in kws_lc)
+
     for gr in grants:
         # hide expired unless explicitly requested
-        if not include_expired and _is_expired(gr.get("deadline", "")):
-            continue
+        is_expired = _is_expired(gr.get("deadline", ""))
+        if not include_expired and is_expired:
+            pass
 
-        s = score_grant(gr, category, kws, amount, state)
-        if s["fit"] == "Low":
-            continue
+        if school_or_district and not has_connectivity_need:
+            grant_terms = {_normalize_keyword_token(t) for t in (gr.get("tags") or [])}
+            if grant_terms & infra_exclude_tags:
+                continue
+
+        s = score_grant(gr, category, kws, amount)
 
         url = grant_display_url(gr)
-        rows.append({
+        row = {
             "title": gr.get("title"),
             "program": gr.get("program") or gr.get("program_id") or gr.get("program_url") or "unknown",
             "program_url": url,  # not shown on free UI, used in paid PDF
+            "program_id": gr.get("program_id", ""),
+            "opp_id": gr.get("opp_id") or gr.get("opportunity_id") or "",
+            "opp_number": gr.get("opp_number") or gr.get("opportunity_number") or "",
             "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
             "deadline": gr.get("deadline", "TBA"),
             "fit": s["fit"],
+            "score": s["score"],
             "fit_notes": s["fit_notes"],
             "requires_match_percent": gr.get("requires_match_percent", 0),
             "max_amount": _safe_float(gr.get("max_amount"), 0),
             "tags": gr.get("tags", []),
             "level": "Federal",
-        })
+        }
+        if is_expired and not include_expired:
+            expired_rows.append(row)
+        else:
+            rows.append(row)
 
-    rows.sort(key=lambda r: (0 if r["fit"] == "High" else 1, -_safe_float(r.get("max_amount"), 0)))
-    federal_rows = rows[:3]
+    rows.sort(key=lambda r: (_safe_float(r.get("score"), 0), _safe_float(r.get("max_amount"), 0)), reverse=True)
 
-    state_rows: List[Dict[str, Any]] = []
-    if state:
-        state_rows.append(_state_portal_result(state))
+    strong_rows = [r for r in rows if r.get("fit") in ("High", "Medium")]
+    if len(strong_rows) >= 3:
+        federal_rows = strong_rows[:3]
+    else:
+        federal_rows = strong_rows[:]
+        for r in rows:
+            if r in federal_rows:
+                continue
+            federal_rows.append(r)
+            if len(federal_rows) >= 3:
+                break
 
-    return state_rows + federal_rows  # state first, then top federal matches
+    if len(federal_rows) < 3 and expired_rows:
+        expired_rows.sort(key=lambda r: (_safe_float(r.get("score"), 0), _safe_float(r.get("max_amount"), 0)), reverse=True)
+        for r in expired_rows:
+            if r in federal_rows:
+                continue
+            federal_rows.append(r)
+            if len(federal_rows) >= 3:
+                break
+
+    return federal_rows
 
 
 def _append_payment_log_row(row: Dict[str, Any]) -> None:
@@ -466,6 +418,12 @@ def _mk_objectives_from_keywords(kws: List[str], audience: str) -> List[str]:
         return out
     # map common terms -> concrete actions
     for k in uniq[:4]:
+        display_k = {
+            "titlei": "Title I",
+            "k12": "K-12",
+            "englishlearners": "English Learners",
+            "specialeducation": "Special Education",
+        }.get(k, k)
         if k in ("stem", "robotics", "technology", "tech"):
             out.append(f"Purchase starter robotics/tech kits and integrate weekly {k.upper()} labs for {audience or 'participants'}.")
         elif k in ("equipment", "supplies"):
@@ -477,7 +435,7 @@ def _mk_objectives_from_keywords(kws: List[str], audience: str) -> List[str]:
         elif k in ("cte", "workforce"):
             out.append("Align activities to CTE/workforce competencies with employer input and mock assessments.")
         else:
-            out.append(f"Implement targeted activities related to “{k}” with measurable outputs.")
+            out.append(f"Implement targeted activities related to “{display_k}” with measurable outputs.")
     return out
 
 
@@ -495,7 +453,7 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     Build a structured narrative draft from intake + grant.
     Used for both preview (shortened) and full paid draft PDF.
     """
-    org = (intake.get("organization") or "Your Organization").strip()
+    org = _organization_name(intake)
     proj_title = (intake.get("projectTitle") or "Proposed initiative").strip()
 
     # Clean audience so it doesn't end with a stray period
@@ -508,12 +466,11 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
 
     notes = (intake.get("notes") or "").strip()
     category = (intake.get("category") or intake.get("who") or "organization").strip()
-    state = (intake.get("state") or "").strip()
 
     amount = _safe_float(intake.get("amountRequested"))
     annual_budget = _safe_float(intake.get("annualBudget"), 0)
     keywords_str = (intake.get("keywords") or "").strip()
-    kws = _norm_words(keywords_str)
+    kws = normalized_keywords(keywords_str)
 
     g_title = grant.get("title") or "Selected opportunity"
     g_deadline = grant.get("deadline") or "TBA"
@@ -540,8 +497,6 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     region_bits = []
     if g_geo:
         region_bits.append(f"This opportunity is described as serving the {g_geo} region.")
-    if state:
-        region_bits.append(f"The applicant is based in {state}.")
     region_note = " ".join(region_bits)
 
     # Objectives & evaluation
@@ -806,7 +761,7 @@ def questionnaire():
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
 
-    org = (data.get("organization") or "Your Organization").strip()
+    org = _organization_name(data)
     results = shortlist(data)
     return jsonify(ok=True, organization=org, results=results)
 
@@ -849,7 +804,7 @@ def create_checkout_session():
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
 
-    org = (data.get("organization") or "Customer").strip()
+    org = _organization_name(data, default="Customer")
     category = (data.get("category") or data.get("who") or "Other").strip()
     amount_req = _safe_float(data.get("amountRequested"))
     annual_budget = _safe_float(data.get("annualBudget"), 0)
@@ -879,6 +834,8 @@ def create_checkout_session():
     metadata = {
         "order_id": order_id,
         "org": org,
+        "organization": org,
+        "organization_name": org,
         "category": category,
         "amountRequested": f"{amount_req:.2f}",
         "annualBudget": f"{annual_budget:.2f}",
@@ -913,6 +870,7 @@ def create_checkout_session():
         "ts_utc": _now_utc(),
         "order_id": order_id,
         "org": org,
+        "organization_name": org,
         "category": category,
         "amountRequested": amount_req,
         "annualBudget": annual_budget,

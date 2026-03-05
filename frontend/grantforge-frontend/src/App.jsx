@@ -10,42 +10,19 @@ import {
 } from "./fetcher";
 import "./App.css";
 
-/* -------- US States + DC -------- */
-const STATES = [
-  { value: "", label: "Select a state (optional)" },
-  { value: "AL", label: "AL — Alabama" }, { value: "AK", label: "AK — Alaska" },
-  { value: "AZ", label: "AZ — Arizona" }, { value: "AR", label: "AR — Arkansas" },
-  { value: "CA", label: "CA — California" }, { value: "CO", label: "CO — Colorado" },
-  { value: "CT", label: "CT — Connecticut" }, { value: "DE", label: "DE — Delaware" },
-  { value: "DC", label: "DC — District of Columbia" }, { value: "FL", label: "FL — Florida" },
-  { value: "GA", label: "GA — Georgia" }, { value: "HI", label: "HI — Hawaii" },
-  { value: "ID", label: "ID — Idaho" }, { value: "IL", label: "IL — Illinois" },
-  { value: "IN", label: "IN — Indiana" }, { value: "IA", label: "IA — Iowa" },
-  { value: "KS", label: "KS — Kansas" }, { value: "KY", label: "KY — Kentucky" },
-  { value: "LA", label: "LA — Louisiana" }, { value: "ME", label: "ME — Maine" },
-  { value: "MD", label: "MD — Maryland" }, { value: "MA", label: "MA — Massachusetts" },
-  { value: "MI", label: "MI — Michigan" }, { value: "MN", label: "MN — Minnesota" },
-  { value: "MS", label: "MS — Mississippi" }, { value: "MO", label: "MO — Missouri" },
-  { value: "MT", label: "MT — Montana" }, { value: "NE", label: "NE — Nebraska" },
-  { value: "NV", label: "NV — Nevada" }, { value: "NH", label: "NH — New Hampshire" },
-  { value: "NJ", label: "NJ — New Jersey" }, { value: "NM", label: "NM — New Mexico" },
-  { value: "NY", label: "NY — New York" }, { value: "NC", label: "NC — North Carolina" },
-  { value: "ND", label: "ND — North Dakota" }, { value: "OH", label: "OH — Ohio" },
-  { value: "OK", label: "OK — Oklahoma" }, { value: "OR", label: "OR — Oregon" },
-  { value: "PA", label: "PA — Pennsylvania" }, { value: "RI", label: "RI — Rhode Island" },
-  { value: "SC", label: "SC — South Carolina" }, { value: "SD", label: "SD — South Dakota" },
-  { value: "TN", label: "TN — Tennessee" }, { value: "TX", label: "TX — Texas" },
-  { value: "UT", label: "UT — Utah" }, { value: "VT", label: "VT — Vermont" },
-  { value: "VA", label: "VA — Virginia" }, { value: "WA", label: "WA — Washington" },
-  { value: "WV", label: "WV — West Virginia" }, { value: "WI", label: "WI — Wisconsin" },
-  { value: "WY", label: "WY — Wyoming" },
-];
-
 /* -------- (Kept for future) Safe Grants.gov URL helper -------- */
-function safeProgramUrl(u, title, tags = []) {
+function safeProgramUrl(u, title, tags = [], row = {}) {
   try {
     if (typeof u === "string" && u.startsWith("http") && u.includes("grants.gov")) return u;
   } catch {}
+
+  const oppId = row.opportunity_id || row.oppId || row.opp_id || row.program_id || "";
+  const oppNumber = row.opportunity_number || row.oppNumber || row.opp_number || "";
+  if (oppId || oppNumber) {
+    const base = `https://www.grants.gov/grantsws/rest/opportunities/details?oppId=${encodeURIComponent(oppId || oppNumber)}`;
+    return oppNumber ? `${base}&oppNumber=${encodeURIComponent(oppNumber)}` : base;
+  }
+
   const q = encodeURIComponent(
     [...(title || "").split(/\s+/).slice(0, 6), ...(tags || []).slice(0, 4)].join(" ")
   );
@@ -129,7 +106,6 @@ function ThanksScreen() {
 function IntakeApp() {
   const [org, setOrg] = useState("");
   const [who, setWho] = useState("");
-  const [stateUS, setStateUS] = useState("");
   const [keywords, setKeywords] = useState("");
   const [amountRequested, setAmountRequested] = useState("");
   const [annualBudget, setAnnualBudget] = useState("");
@@ -144,14 +120,12 @@ function IntakeApp() {
   const [error, setError] = useState("");
   const [previewBusy, setPreviewBusy] = useState({}); // per-row preview spinner/lock
 
-  const stateResults = results.filter(row => (row.level || "").toLowerCase() === "state");
-  const federalResults = results.filter(row => (row.level || "").toLowerCase() !== "state");
+  const federalResults = results;
 
   function intakePayload() {
     return {
       organization: org,
       category: who,
-      state: stateUS,
       keywords,
       amountRequested: Number(amountRequested || 0),
       annualBudget: Number(annualBudget || 0),
@@ -218,11 +192,10 @@ function IntakeApp() {
       <section className="card">
         <h2>Tell us about your project (Free Intake)</h2>
         <p className="muted">
-          Intake and recommendations are free. You only pay when you choose to generate a full custom draft PDF.
+          Free intake and recommendations. Flat fee: $2,500 per proposal draft (no refunds).
         </p>
         <p className="muted" style={{ marginTop: 4 }}>
-          Typical pricing: Teachers ≈ <strong>$9.99</strong> per draft. Most orgs ≈ <strong>$49–$199</strong>,
-          automatically sized to your budget.
+          We do not guarantee funding and do not submit grants on your behalf.
         </p>
 
         <label>Organization
@@ -243,14 +216,6 @@ function IntakeApp() {
             <option>Small Business</option>
             <option>City / Municipality</option>
             <option>Other</option>
-          </select>
-        </label>
-
-        <label>State (optional)
-          <select value={stateUS} onChange={e=>setStateUS(e.target.value)}>
-            {STATES.map(s => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
           </select>
         </label>
 
@@ -324,42 +289,9 @@ function IntakeApp() {
         <section className="results">
           <h3>Recommended Opportunities</h3>
           <p className="muted">
-            We show a short list of good fits. State options appear first when provided. A detailed draft PDF is provided
-            after payment, and you’ll get the official Grants.gov link with your draft.
+            We show a short list of good-fit federal opportunities based on category and keywords. A detailed draft PDF is provided
+            after payment, with the official Grants.gov notice link for your selected opportunity.
           </p>
-
-          {stateResults.length > 0 && (
-            <div className="results-group">
-              <h4>State Opportunities</h4>
-              <ul>
-                {stateResults.map((row, i) => (
-                  <li key={`state-${i}`} className="result">
-                    <div className="row1">
-                      <strong>{row.title}</strong>
-                      <span>
-                        {" — "}{row.amount}
-                        {" — Deadline "}{row.deadline}
-                      </span>
-                    </div>
-
-                    {row.program_url && (
-                      <div className="muted" style={{ marginTop: 4 }}>
-                        <a
-                          href={row.program_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          Open state grants portal
-                        </a>
-                      </div>
-                    )}
-
-                    {row.fit_notes && <div className="notes">Notes: {row.fit_notes}</div>}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
 
           {federalResults.length > 0 ? (
             <div className="results-group">
@@ -376,10 +308,10 @@ function IntakeApp() {
                       </span>
                     </div>
 
-                    {row.program_url && (
+                    {(row.program_url || row.program_id || row.oppId || row.opp_id || row.opportunity_id) && (
                       <div className="muted" style={{ marginTop: 4 }}>
                         <a
-                          href={row.program_url}
+                          href={safeProgramUrl(row.program_url, row.title, row.tags, row)}
                           target="_blank"
                           rel="noopener noreferrer"
                         >
@@ -420,7 +352,7 @@ function IntakeApp() {
               </ul>
             </div>
           ) : (
-            <p className="muted">No federal opportunities matched this intake. Adjust your keywords and try again.</p>
+            <p className="muted">We couldn’t find a strong federal match yet. Try broadening your keywords, lowering your requested amount, or choosing a different category and run recommendations again.</p>
           )}
         </section>
       )}
