@@ -42,11 +42,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 
 # Pricing
-BASE_PRICE = 49.99
-TEACHER_PRICE = 9.99
-SMALL_PRICE = 49.99
-MEDIUM_PRICE = 99.99
-LARGE_PRICE = 199.99
+FLAT_PRICE = 2500.00
 
 # ---------------- Flask app ----------------
 app = Flask(__name__)
@@ -273,14 +269,9 @@ def _state_portal_result(state_abbrev: str) -> Dict[str, Any]:
 
 
 def price_for(category: str, annual_budget: float) -> float:
-    c = (category or "").lower()
-    if c.startswith("teacher"):
-        return TEACHER_PRICE
-    if annual_budget <= 500_000:
-        return SMALL_PRICE
-    if annual_budget <= 2_000_000:
-        return MEDIUM_PRICE
-    return LARGE_PRICE
+    _ = category
+    _ = annual_budget
+    return FLAT_PRICE
 
 
 def fraud_check(category: str, amount: float) -> Dict[str, Any]:

@@ -113,7 +113,7 @@ function ThanksScreen() {
         <p className="muted">
           Keep this link for your records. You can request edits before any submission.
         </p>
-        <p className="policy-note"><strong>All sales are final. No refunds.</strong></p>
+        <p className="policy-note"><strong>All sales are final; there are no refunds.</strong></p>
       </section>
 
       <footer className="footer">
@@ -222,10 +222,9 @@ function IntakeApp() {
           Intake and recommendations are free. You only pay when you choose to generate a full custom draft PDF.
         </p>
         <p className="muted" style={{ marginTop: 4 }}>
-          Typical pricing: Teachers ≈ <strong>$9.99</strong> per draft. Most orgs ≈ <strong>$49–$199</strong>,
-          automatically sized to your budget.
+          Flat fee: <strong>$2,500</strong> per proposal draft (no refunds).
         </p>
-        <p className="policy-note">All sales are final. No refunds.</p>
+        <p className="policy-note">All sales are final; there are no refunds.</p>
 
         <label>Organization
           <input
