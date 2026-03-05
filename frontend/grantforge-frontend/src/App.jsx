@@ -10,10 +10,10 @@ import {
 } from "./fetcher";
 import "./App.css";
 
-/* -------- (Kept for future) Safe Grants.gov URL helper -------- */
+/* -------- Safe Grants.gov direct opportunity URL helper -------- */
 function safeProgramUrl(u, title, tags = [], row = {}) {
   try {
-    if (typeof u === "string" && u.startsWith("http") && u.includes("grants.gov")) return u;
+    if (typeof u === "string" && u.startsWith("http") && u.includes("grants.gov") && !u.includes("search-grants")) return u;
   } catch {}
 
   const oppId = row.opportunity_id || row.oppId || row.opp_id || row.program_id || "";
@@ -23,10 +23,7 @@ function safeProgramUrl(u, title, tags = [], row = {}) {
     return oppNumber ? `${base}&oppNumber=${encodeURIComponent(oppNumber)}` : base;
   }
 
-  const q = encodeURIComponent(
-    [...(title || "").split(/\s+/).slice(0, 6), ...(tags || []).slice(0, 4)].join(" ")
-  );
-  return `https://www.grants.gov/search-grants?keywords=${q}`;
+  return "";
 }
 
 /* -------- Success Screen -------- */
@@ -118,6 +115,7 @@ function IntakeApp() {
   const [results, setResults] = useState([]);
   const [previews, setPreviews] = useState({});
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [previewBusy, setPreviewBusy] = useState({}); // per-row preview spinner/lock
 
   const federalResults = results;
@@ -142,10 +140,12 @@ function IntakeApp() {
     setLoading(true);
     setResults([]);
     setPreviews({});
+    setNotice("");
     try {
       const data = await shortlist(intakePayload());
       if (!data.ok) throw new Error(data.error || "Could not fetch recommendations.");
       setResults(data.results || []);
+      setNotice(data.notice || "");
     } catch (e) {
       setError(e.message || "Something went wrong. Please try again.");
     } finally {
@@ -192,7 +192,7 @@ function IntakeApp() {
       <section className="card">
         <h2>Tell us about your project (Free Intake)</h2>
         <p className="muted">
-          Free intake and recommendations. Flat fee: $2,500 per proposal draft (no refunds).
+          Free intake and recommendations. Flat fee: $2,500 per proposal draft. All sales final. No refunds.
         </p>
         <p className="muted" style={{ marginTop: 4 }}>
           We do not guarantee funding and do not submit grants on your behalf.
@@ -293,6 +293,7 @@ function IntakeApp() {
             after payment, with the official Grants.gov notice link for your selected opportunity.
           </p>
 
+          {notice && <p className="muted">{notice}</p>}
           {federalResults.length > 0 ? (
             <div className="results-group">
               <h4>Federal Opportunities</h4>
@@ -308,17 +309,21 @@ function IntakeApp() {
                       </span>
                     </div>
 
-                    {(row.program_url || row.program_id || row.oppId || row.opp_id || row.opportunity_id) && (
-                      <div className="muted" style={{ marginTop: 4 }}>
-                        <a
-                          href={safeProgramUrl(row.program_url, row.title, row.tags, row)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          View official notice on Grants.gov
-                        </a>
-                      </div>
-                    )}
+                    {(() => {
+                      const directUrl = safeProgramUrl(row.program_url, row.title, row.tags, row);
+                      if (!directUrl) return null;
+                      return (
+                        <div className="muted" style={{ marginTop: 4 }}>
+                          <a
+                            href={directUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            View official notice on Grants.gov
+                          </a>
+                        </div>
+                      );
+                    })()}
 
                     {Array.isArray(row.tags) && row.tags.length > 0 && (
                       <div className="muted" style={{ marginTop: 4 }}>
@@ -337,7 +342,7 @@ function IntakeApp() {
                         {previewBusy[row.title] ? "Building preview…" : "See Sample Language (Free)"}
                       </button>
                       <button onClick={()=>handlePay(row)} disabled={loading}>
-                        Generate Full Draft (Pay)
+                        Generate Full Draft — $2,500
                       </button>
                     </div>
 
@@ -352,7 +357,7 @@ function IntakeApp() {
               </ul>
             </div>
           ) : (
-            <p className="muted">We couldn’t find a strong federal match yet. Try broadening your keywords, lowering your requested amount, or choosing a different category and run recommendations again.</p>
+            <p className="muted">No direct federal matches found. Showing closest opportunities.</p>
           )}
         </section>
       )}
