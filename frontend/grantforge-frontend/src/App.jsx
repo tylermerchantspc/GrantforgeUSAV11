@@ -218,11 +218,7 @@ function IntakeApp() {
       <section className="card">
         <h2>Tell us about your project (Free Intake)</h2>
         <p className="muted">
-          Intake and recommendations are free. You only pay when you choose to generate a full custom draft PDF.
-        </p>
-        <p className="muted" style={{ marginTop: 4 }}>
-          Typical pricing: Teachers ≈ <strong>$9.99</strong> per draft. Most orgs ≈ <strong>$49–$199</strong>,
-          automatically sized to your budget.
+          Free intake and recommendations. Flat fee: $2,500 per proposal draft (no refunds).
         </p>
 
         <label>Organization
@@ -420,7 +416,7 @@ function IntakeApp() {
               </ul>
             </div>
           ) : (
-            <p className="muted">No federal opportunities matched this intake. Adjust your keywords and try again.</p>
+            <p className="muted">We couldn’t find a strong federal match yet. Try broadening your keywords, lowering your requested amount, or choosing a different category and run recommendations again.</p>
           )}
         </section>
       )}

@@ -42,11 +42,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 
 # Pricing
-BASE_PRICE = 49.99
-TEACHER_PRICE = 9.99
-SMALL_PRICE = 49.99
-MEDIUM_PRICE = 99.99
-LARGE_PRICE = 199.99
+FLAT_PRICE = 2500.00
 
 # ---------------- Flask app ----------------
 app = Flask(__name__)
@@ -80,6 +76,42 @@ def _read_json(path: str) -> Any:
 
 def _norm_words(s: str) -> List[str]:
     return [w.strip().lower() for w in (s or "").replace(",", " ").split() if w.strip()]
+
+
+def _normalize_keyword_token(token: str) -> str:
+    t = (token or "").strip().lower().replace("-", " ")
+    t = " ".join(t.split())
+    keyword_aliases = {
+        "title i": "title 1",
+        "title one": "title 1",
+        "k12": "k 12",
+        "k 12": "k-12",
+        "k-12": "k-12",
+        "ell": "english language learners",
+        "esl": "english language learners",
+        "sped": "special education",
+        "special ed": "special education",
+    }
+    return keyword_aliases.get(t, t)
+
+
+def normalized_keywords(raw_keywords: str) -> List[str]:
+    raw = [w.strip() for w in (raw_keywords or "").replace(",", " ").split() if w.strip()]
+    normalized = []
+    for w in raw:
+        n = _normalize_keyword_token(w)
+        if n and n not in normalized:
+            normalized.append(n)
+    return normalized
+
+
+def _organization_name(payload: Dict[str, Any], default: str = "Your Organization") -> str:
+    return (
+        payload.get("organization")
+        or payload.get("organization_name")
+        or payload.get("org")
+        or default
+    ).strip()
 
 
 def _safe_float(x, default=0.0) -> float:
@@ -258,14 +290,7 @@ def _state_portal_result(state_abbrev: str) -> Dict[str, Any]:
 
 
 def price_for(category: str, annual_budget: float) -> float:
-    c = (category or "").lower()
-    if c.startswith("teacher"):
-        return TEACHER_PRICE
-    if annual_budget <= 500_000:
-        return SMALL_PRICE
-    if annual_budget <= 2_000_000:
-        return MEDIUM_PRICE
-    return LARGE_PRICE
+    return FLAT_PRICE
 
 
 def fraud_check(category: str, amount: float) -> Dict[str, Any]:
@@ -322,7 +347,7 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
         score += 2
 
     # keywords vs tags
-    tags = [t.lower() for t in gr.get("tags", [])]
+    tags = [_normalize_keyword_token(t) for t in gr.get("tags", [])]
     overlap = set(kws) & set(tags)
     if overlap:
         score += min(len(overlap), 3)  # up to +3
@@ -376,15 +401,29 @@ def shortlist(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     grants = _read_json(GRANTS_PATH) or []
     category = payload.get("category") or payload.get("who") or ""
     amount = _safe_float(payload.get("amountRequested"))
-    kws = _norm_words(payload.get("keywords", ""))
+    kws = normalized_keywords(payload.get("keywords", ""))
     state = (payload.get("state") or "").strip()
     include_expired = bool(payload.get("includeExpired"))  # default hides expired
 
     rows = []
+    internet_terms = {
+        "internet", "connectivity", "broadband", "wifi", "wi-fi", "hotspot", "network",
+    }
+    infra_exclude_tags = {
+        "broadband", "telecom", "telecommunications", "infrastructure", "fiber", "utilities",
+    }
+    school_or_district = "school" in category.lower() or "district" in category.lower()
+    has_connectivity_need = any(k in internet_terms for k in kws)
+
     for gr in grants:
         # hide expired unless explicitly requested
         if not include_expired and _is_expired(gr.get("deadline", "")):
             continue
+
+        if school_or_district and not has_connectivity_need:
+            grant_terms = {_normalize_keyword_token(t) for t in (gr.get("tags") or [])}
+            if grant_terms & infra_exclude_tags:
+                continue
 
         s = score_grant(gr, category, kws, amount, state)
         if s["fit"] == "Low":
@@ -495,7 +534,7 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     Build a structured narrative draft from intake + grant.
     Used for both preview (shortened) and full paid draft PDF.
     """
-    org = (intake.get("organization") or "Your Organization").strip()
+    org = _organization_name(intake)
     proj_title = (intake.get("projectTitle") or "Proposed initiative").strip()
 
     # Clean audience so it doesn't end with a stray period
@@ -513,7 +552,7 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     amount = _safe_float(intake.get("amountRequested"))
     annual_budget = _safe_float(intake.get("annualBudget"), 0)
     keywords_str = (intake.get("keywords") or "").strip()
-    kws = _norm_words(keywords_str)
+    kws = normalized_keywords(keywords_str)
 
     g_title = grant.get("title") or "Selected opportunity"
     g_deadline = grant.get("deadline") or "TBA"
@@ -806,7 +845,7 @@ def questionnaire():
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
 
-    org = (data.get("organization") or "Your Organization").strip()
+    org = _organization_name(data)
     results = shortlist(data)
     return jsonify(ok=True, organization=org, results=results)
 
@@ -849,7 +888,7 @@ def create_checkout_session():
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
 
-    org = (data.get("organization") or "Customer").strip()
+    org = _organization_name(data, default="Customer")
     category = (data.get("category") or data.get("who") or "Other").strip()
     amount_req = _safe_float(data.get("amountRequested"))
     annual_budget = _safe_float(data.get("annualBudget"), 0)
@@ -879,6 +918,8 @@ def create_checkout_session():
     metadata = {
         "order_id": order_id,
         "org": org,
+        "organization": org,
+        "organization_name": org,
         "category": category,
         "amountRequested": f"{amount_req:.2f}",
         "annualBudget": f"{annual_budget:.2f}",
@@ -913,6 +954,7 @@ def create_checkout_session():
         "ts_utc": _now_utc(),
         "order_id": order_id,
         "org": org,
+        "organization_name": org,
         "category": category,
         "amountRequested": amount_req,
         "annualBudget": annual_budget,
