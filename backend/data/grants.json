@@ -2,7 +2,7 @@
   {
     "title": "Community Development Block Grant (CDBG)",
     "program_url": "https://www.grants.gov/search-grants?keywords=Community%20Development%20Block%20Grant%20CDBG",
-    "deadline": "2025-12-31",
+    "deadline": "2027-12-31",
     "min_amount": 5000,
     "max_amount": 500000,
     "eligible_types": [
@@ -11,8 +11,6 @@
       "county",
       "local government",
       "tribal",
-      "501",
-      "nonprofit",
       "community development"
     ],
     "tags": [
@@ -23,12 +21,14 @@
     ],
     "requires_match_percent": 10,
     "geo_scope": "South",
-    "opportunity_id": "GFUSA-1001"
+    "opportunity_id": "GFUSA-1001",
+    "official_url": "https://www.grants.gov/search-grants?keywords=Community%20Development%20Block%20Grant%20CDBG",
+    "close_date": "2027-12-31"
   },
   {
     "title": "Safe Streets and Roads for All (SS4A)",
     "program_url": "https://www.grants.gov/search-grants?keywords=Safe%20Streets%20and%20Roads%20for%20All%20SS4A",
-    "deadline": "2026-01-15",
+    "deadline": "2027-12-31",
     "min_amount": 25000,
     "max_amount": 200000,
     "eligible_types": [
@@ -46,12 +46,14 @@
     ],
     "requires_match_percent": 20,
     "geo_scope": "Northeast",
-    "opportunity_id": "GFUSA-1002"
+    "opportunity_id": "GFUSA-1002",
+    "official_url": "https://www.grants.gov/search-grants?keywords=Safe%20Streets%20and%20Roads%20for%20All%20SS4A",
+    "close_date": "2027-12-31"
   },
   {
     "title": "Small Business Innovation Research (SBIR) \u2013 Starter",
     "program_url": "https://www.grants.gov/search-grants?keywords=Small%20Business%20Innovation%20Research%20SBIR",
-    "deadline": "2026-03-31",
+    "deadline": "2027-12-31",
     "min_amount": 15000,
     "max_amount": 75000,
     "eligible_types": [
@@ -64,17 +66,19 @@
     "tags": [
       "innovation",
       "technology",
-      "prototype",
+      "product development",
       "R&D"
     ],
     "requires_match_percent": 10,
     "geo_scope": "Southwest",
-    "opportunity_id": "GFUSA-1003"
+    "opportunity_id": "GFUSA-1003",
+    "official_url": "https://www.grants.gov/search-grants?keywords=Small%20Business%20Innovation%20Research%20SBIR",
+    "close_date": "2027-12-31"
   },
   {
     "title": "USDA ReConnect \u2013 Rural Broadband",
     "program_url": "https://www.grants.gov/search-grants?keywords=USDA%20ReConnect%20rural%20broadband",
-    "deadline": "2026-04-30",
+    "deadline": "2027-12-31",
     "min_amount": 20000,
     "max_amount": 250000,
     "eligible_types": [
@@ -93,12 +97,14 @@
     ],
     "requires_match_percent": 15,
     "geo_scope": "West",
-    "opportunity_id": "GFUSA-1004"
+    "opportunity_id": "GFUSA-1004",
+    "official_url": "https://www.grants.gov/search-grants?keywords=USDA%20ReConnect%20rural%20broadband",
+    "close_date": "2027-12-31"
   },
   {
     "title": "21st Century Community Learning Centers (After-School)",
     "program_url": "https://www.grants.gov/search-grants?keywords=21st%20Century%20Community%20Learning%20Centers%2021st%20CCLC",
-    "deadline": "2025-12-15",
+    "deadline": "2027-12-31",
     "min_amount": 5000,
     "max_amount": 30000,
     "eligible_types": [
@@ -118,12 +124,14 @@
     ],
     "requires_match_percent": 0,
     "geo_scope": "Midwest",
-    "opportunity_id": "GFUSA-1005"
+    "opportunity_id": "GFUSA-1005",
+    "official_url": "https://www.grants.gov/search-grants?keywords=21st%20Century%20Community%20Learning%20Centers%2021st%20CCLC",
+    "close_date": "2027-12-31"
   },
   {
     "title": "Perkins V \u2013 CTE Equipment & Pathways",
     "program_url": "https://www.grants.gov/search-grants?keywords=Perkins%20V%20career%20technical%20education",
-    "deadline": "2025-12-20",
+    "deadline": "2027-12-31",
     "min_amount": 10000,
     "max_amount": 60000,
     "eligible_types": [
@@ -142,12 +150,14 @@
     ],
     "requires_match_percent": 5,
     "geo_scope": "Great Lakes",
-    "opportunity_id": "GFUSA-1006"
+    "opportunity_id": "GFUSA-1006",
+    "official_url": "https://www.grants.gov/search-grants?keywords=Perkins%20V%20career%20technical%20education",
+    "close_date": "2027-12-31"
   },
   {
     "title": "Faith & Neighborhood Partnerships \u2013 Outreach Microgrants",
     "program_url": "https://www.grants.gov/search-grants?keywords=faith%20based%20community%20outreach%20microgrant",
-    "deadline": "2026-02-28",
+    "deadline": "2027-12-31",
     "min_amount": 1000,
     "max_amount": 10000,
     "eligible_types": [
@@ -167,12 +177,14 @@
     ],
     "requires_match_percent": 0,
     "geo_scope": "Mid-Atlantic",
-    "opportunity_id": "GFUSA-1007"
+    "opportunity_id": "GFUSA-1007",
+    "official_url": "https://www.grants.gov/search-grants?keywords=faith%20based%20community%20outreach%20microgrant",
+    "close_date": "2027-12-31"
   },
   {
     "title": "Classroom Supplies & Mini-Equipment (Teacher Microgrant)",
     "program_url": "https://www.grants.gov/search-grants?keywords=teacher%20classroom%20supplies%20mini%20grant",
-    "deadline": "2026-01-31",
+    "deadline": "2027-12-31",
     "min_amount": 300,
     "max_amount": 2000,
     "eligible_types": [
@@ -191,12 +203,14 @@
     ],
     "requires_match_percent": 0,
     "geo_scope": "US",
-    "opportunity_id": "GFUSA-1008"
+    "opportunity_id": "GFUSA-1008",
+    "official_url": "https://www.grants.gov/search-grants?keywords=teacher%20classroom%20supplies%20mini%20grant",
+    "close_date": "2027-12-31"
   },
   {
     "title": "STEM Classroom Innovation (Teacher-Led)",
     "program_url": "https://www.grants.gov/search-grants?keywords=teacher%20STEM%20classroom%20innovation%20grant",
-    "deadline": "2025-12-20",
+    "deadline": "2027-12-31",
     "min_amount": 1000,
     "max_amount": 15000,
     "eligible_types": [
@@ -216,6 +230,8 @@
     ],
     "requires_match_percent": 0,
     "geo_scope": "US",
-    "opportunity_id": "GFUSA-1009"
+    "opportunity_id": "GFUSA-1009",
+    "official_url": "https://www.grants.gov/search-grants?keywords=teacher%20STEM%20classroom%20innovation%20grant",
+    "close_date": "2027-12-31"
   }
 ]

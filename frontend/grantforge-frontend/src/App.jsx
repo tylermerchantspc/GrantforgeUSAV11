@@ -12,6 +12,7 @@ import "./App.css";
 
 /* -------- Safe Grants.gov direct opportunity URL helper -------- */
 function safeProgramUrl(u, title, tags = [], row = {}) {
+  if (row.official_url) return row.official_url;
   try {
     if (typeof u === "string" && u.startsWith("http") && u.includes("grants.gov") && !u.includes("search-grants")) return u;
   } catch {}
@@ -85,7 +86,7 @@ function ThanksScreen() {
           <p className="error">{err || "Preparing your file..."}</p>
         )}
         <p className="muted">
-          Keep this link for your records. You can request edits before any submission.
+          Keep this link for your records. You may request edits before submitting to any funding organization.
         </p>
       </section>
 
@@ -339,7 +340,7 @@ function IntakeApp() {
                         disabled={!!previewBusy[row.title] || loading}
                         aria-busy={!!previewBusy[row.title]}
                       >
-                        {previewBusy[row.title] ? "Building preview…" : "See Sample Language (Free)"}
+                        {previewBusy[row.title] ? "Building preview…" : "See Preview Language (Free)"}
                       </button>
                       <button onClick={()=>handlePay(row)} disabled={loading}>
                         Generate Full Draft — $2,500
@@ -348,7 +349,7 @@ function IntakeApp() {
 
                     {previews[row.title] && (
                       <div className="preview">
-                        <p className="muted">Sample only — your paid draft is longer and fully formatted.</p>
+                        <p className="muted">Preview language — your paid draft is longer and fully formatted.</p>
                         <pre>{previews[row.title]}</pre>
                       </div>
                     )}
