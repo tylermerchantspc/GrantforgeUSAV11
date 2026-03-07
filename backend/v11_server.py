@@ -1,4 +1,4 @@
-# GrantforgeUSA — v11.4 backend (TEST/LIVE READY)
+# GrantforgeUSA — v11.4 backend (launch path)
 # Purpose: shortlist w/ real matching + fraud checks, Stripe checkout,
 #          REAL narrative draft generation, reliable PDF download
 #          (eager + webhook), contextual previews, and debug utilities.
@@ -28,7 +28,7 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")            # sk_test_... / s
 PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")      # pk_test_... / pk_live_...
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "") # whsec_...
 
-APP_MODE = os.getenv("APP_MODE", "test").lower()  # "test" | "live"
+APP_MODE = os.getenv("APP_MODE", "test").lower()  # keep for environment-level behavior only
 
 # ===== Writable storage (Render dynos can only write to /tmp) =====
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/tmp/grantforge_v11")
@@ -75,7 +75,23 @@ def _read_json(path: str) -> Any:
 
 
 def _norm_words(s: str) -> List[str]:
-    return [w.strip().lower() for w in (s or "").replace(",", " ").split() if w.strip()]
+    return [w.strip().lower() for w in re.split(r"[,;\n]", (s or "")) if w.strip()]
+
+
+INTAKE_TYPE_MAP = {
+    "teacher (classroom)": "EDU",
+    "school / district": "EDU",
+    "church / faith org": "NONPROFIT",
+    "501c3 nonprofit": "NONPROFIT",
+    "small business": "SMALL_BUSINESS",
+    "city / municipality": "GOV_LOCAL",
+    "other": "NONPROFIT",
+}
+
+
+def normalize_applicant_type(category: str) -> str:
+    c = (category or "").strip().lower()
+    return INTAKE_TYPE_MAP.get(c, "NONPROFIT")
 
 
 def _normalize_keyword_token(token: str) -> str:
@@ -84,6 +100,8 @@ def _normalize_keyword_token(token: str) -> str:
         return ""
     t = re.sub(r"\btitle\s*(?:i|1)\b", "titlei", t)
     t = re.sub(r"\bk\s*[- ]?\s*12\b", "k12", t)
+    t = re.sub(r"\bstem\b", "stem", t)
+    t = re.sub(r"\btechnology\s+training\b", "technology", t)
     t = re.sub(r"\bell\b", "englishlearners", t)
     t = re.sub(r"\bsped\b", "specialeducation", t)
     t = t.replace("-", " ")
@@ -98,6 +116,15 @@ def normalized_keywords(raw_keywords: str) -> List[str]:
         if n and n not in normalized:
             normalized.append(n)
     return normalized
+
+
+def normalized_tags(raw_tags: List[str]) -> List[str]:
+    tokens: List[str] = []
+    for t in (raw_tags or []):
+        n = _normalize_keyword_token(str(t))
+        if n and n not in tokens:
+            tokens.append(n)
+    return tokens
 
 
 def _organization_name(payload: Dict[str, Any], default: str = "Your Organization") -> str:
@@ -135,7 +162,8 @@ def _is_expired(deadline_str: str) -> bool:
 
 def fallback_grants_gov_url(title: str, tags: List[str]) -> str:
     """Fallback to Grants.gov listings page when no direct opportunity ID is available."""
-    return ""
+    q = " ".join([title] + list(tags or [])).strip() or "federal grants"
+    return f"https://www.grants.gov/search-grants?keywords={q.replace(' ', '%20')}"
 
 
 # -------- URL normalizer (force Grants.gov or fallback to its search) --------
@@ -167,6 +195,10 @@ def grant_display_url(gr: Dict[str, Any]) -> str:
         or ""
     ).strip()
 
+    official_url = (gr.get("official_url") or "").strip()
+    if official_url:
+        return _ensure_http_url(official_url, gr.get("title", ""), gr.get("tags", []) or [])
+
     if opp_id or opp_number:
         query = f"oppId={opp_id or opp_number}"
         if opp_number:
@@ -181,7 +213,7 @@ def grant_display_url(gr: Dict[str, Any]) -> str:
 
 
 def _pdf_header_mode_note() -> str:
-    return "TEST MODE" if APP_MODE != "live" else "LIVE"
+    return "Production"
 
 
 def _wrap_draw_line(c: canvas.Canvas, text: str, start_x: int, y: int, width_chars: int = 110) -> int:
@@ -234,17 +266,13 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
     """
     score = 0
     fit_notes: List[str] = []
+    applicant_type = normalize_applicant_type(category)
 
-    cat_lower = (category or "").lower()
+    # 1) eligibility (already gated, but weighted highest)
+    score += 100
+    fit_notes.append(f"Eligibility matched for {applicant_type}.")
 
-    # category eligibility
-    elig = [e.lower() for e in gr.get("eligible_types", [])]
-    if any(e in cat_lower for e in elig):
-        score += 2
-    else:
-        fit_notes.append("Category not an explicit match.")
-
-    # amount window
+    # 4) funding similarity
     min_amt = _safe_float(gr.get("min_amount"), 0.0)
     max_amt = _safe_float(gr.get("max_amount"), 10**12)
     if amount < min_amt:
@@ -252,16 +280,27 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
     elif amount > max_amt:
         fit_notes.append(f"Ask (${amount:,.0f}) exceeds maximum (${max_amt:,.0f}).")
     else:
-        score += 2
+        score += 5
 
-    # keywords vs tags
-    tags = [_normalize_keyword_token(t) for t in gr.get("tags", [])]
+    # 2) keyword overlap
+    tags = normalized_tags(gr.get("tags", []))
     overlap = set(kws) & set(tags)
     if overlap:
-        score += min(len(overlap), 3)  # up to +3
+        score += min(len(overlap), 3) * 10
         fit_notes.append("Good overlap with focus areas: " + ", ".join(sorted(overlap)) + ".")
     else:
         fit_notes.append("Limited keyword overlap with focus areas.")
+
+    # 3) category relevance
+    elig_text = " ".join([str(e).lower() for e in gr.get("eligible_types", [])])
+    if applicant_type == "SMALL_BUSINESS" and any(t in elig_text for t in ["small business", "startup", "for-profit", "smb"]):
+        score += 8
+    elif applicant_type == "GOV_LOCAL" and any(t in elig_text for t in ["municipality", "city", "county", "local government", "tribal"]):
+        score += 8
+    elif applicant_type == "EDU" and any(t in elig_text for t in ["school", "district", "educator", "teacher", "k12", "classroom"]):
+        score += 8
+    elif applicant_type == "NONPROFIT" and any(t in elig_text for t in ["501", "nonprofit", "faith", "church", "community organization"]):
+        score += 8
 
     # deadline
     if _deadline_ok(gr.get("deadline", "")):
@@ -278,6 +317,32 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
     return {"score": score, "fit": fit, "fit_notes": " ".join(fit_notes)}
 
 
+def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
+    title = (gr.get("title") or "").lower()
+    tags = " ".join(normalized_tags(gr.get("tags", [])))
+    haystack = f"{title} {tags}"
+
+    # hard gating rules before scoring
+    if "sbir" in haystack:
+        return applicant_type == "SMALL_BUSINESS"
+    if "cdbg" in haystack:
+        return applicant_type == "GOV_LOCAL"
+    if any(k in haystack for k in ["education", "classroom", "school", "district", "titlei", "stem", "robotics", "perkins"]):
+        return applicant_type == "EDU"
+
+    if applicant_type == "NONPROFIT" and any(k in haystack for k in ["telecom", "telecommunications", "broadband", "fiber", "infrastructure"]):
+        return False
+
+    elig = " ".join([str(e).lower() for e in gr.get("eligible_types", [])])
+    if applicant_type == "SMALL_BUSINESS":
+        return any(t in elig for t in ["small business", "startup", "for-profit", "smb", "microenterprise"])
+    if applicant_type == "GOV_LOCAL":
+        return any(t in elig for t in ["municipality", "city", "county", "local government", "tribal"])
+    if applicant_type == "EDU":
+        return any(t in elig for t in ["school", "district", "teacher", "educator", "k12", "classroom"])
+    return any(t in elig for t in ["501", "nonprofit", "faith", "church", "community organization"])
+
+
 def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     """
     Turn intake into 0–3 strong matches from backend/data/grants.json.
@@ -290,31 +355,22 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     grants = _read_json(GRANTS_PATH) or []
     category = payload.get("category") or payload.get("who") or ""
     amount = _safe_float(payload.get("amountRequested"))
+    applicant_type = normalize_applicant_type(category)
     kws = normalized_keywords(payload.get("keywords", ""))
-    include_expired = bool(payload.get("includeExpired"))  # default hides expired
+    include_expired = bool(payload.get("includeExpired"))
 
     rows = []
     expired_rows = []
-    internet_terms = {
-        "internet", "connectivity", "wifi", "wi-fi", "network",
-    }
-    infra_exclude_tags = {
-        "broadband", "telecom", "telecommunications", "infrastructure", "fiber", "utilities",
-    }
-    school_or_district = "school" in category.lower() or "district" in category.lower()
-    kws_lc = {k.lower() for k in kws}
-    has_connectivity_need = any(k in internet_terms for k in kws_lc)
 
     for gr in grants:
         # hide expired unless explicitly requested
-        is_expired = _is_expired(gr.get("deadline", ""))
+        close_date = gr.get("close_date") or gr.get("deadline") or ""
+        is_expired = _is_expired(close_date)
         if not include_expired and is_expired:
-            pass
+            continue
 
-        if school_or_district and not has_connectivity_need:
-            grant_terms = {_normalize_keyword_token(t) for t in (gr.get("tags") or [])}
-            if grant_terms & infra_exclude_tags:
-                continue
+        if not _is_eligible_for_applicant(gr, applicant_type):
+            continue
 
         s = score_grant(gr, category, kws, amount)
 
@@ -327,7 +383,7 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
             "opp_id": gr.get("opp_id") or gr.get("opportunity_id") or "",
             "opp_number": gr.get("opp_number") or gr.get("opportunity_number") or "",
             "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
-            "deadline": gr.get("deadline", "TBA"),
+            "deadline": close_date or "TBA",
             "fit": s["fit"],
             "score": s["score"],
             "fit_notes": s["fit_notes"],
@@ -348,22 +404,7 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     if len(strong_rows) >= 3:
         federal_rows = strong_rows[:3]
     else:
-        federal_rows = strong_rows[:]
-        for r in rows:
-            if r in federal_rows:
-                continue
-            federal_rows.append(r)
-            if len(federal_rows) >= 3:
-                break
-
-    if len(federal_rows) < 3 and expired_rows:
-        expired_rows.sort(key=lambda r: (_safe_float(r.get("score"), 0), _safe_float(r.get("max_amount"), 0)), reverse=True)
-        for r in expired_rows:
-            if r in federal_rows:
-                continue
-            federal_rows.append(r)
-            if len(federal_rows) >= 3:
-                break
+        federal_rows = rows[:3]
 
     return federal_rows, has_strong_matches
 
@@ -628,7 +669,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
 
     def draw_header() -> int:
         c.setFont("Helvetica-Bold", 14)
-        c.drawString(left_margin, top_y, f"GrantforgeUSA | Draft ({_pdf_header_mode_note()})")
+        c.drawString(left_margin, top_y, "GrantforgeUSA | Proposal Draft")
         c.setFont("Helvetica", 10)
         c.drawString(left_margin, top_y - 15, f"Order: {order_id}")
         c.drawString(left_margin, top_y - 28, f"Created: {created_at}")
@@ -682,6 +723,17 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
             y = new_page()
 
         y = draw_section_header("Order Details")
+
+        summary_lines = [
+            f"Project title: {payload.get('projectTitle', '')}",
+            f"Applicant type: {payload.get('category', '')}",
+            f"Requested amount: ${_safe_float(payload.get('amountRequested'), 0):,.2f}",
+            f"Recommended opportunity: {payload.get('grant_title', '')}",
+        ]
+        for line in summary_lines:
+            if y < bottom_margin:
+                y = new_page()
+            y = draw_line(line)
 
         for k in sorted(payload.keys()):
             if k == "draft_body":
