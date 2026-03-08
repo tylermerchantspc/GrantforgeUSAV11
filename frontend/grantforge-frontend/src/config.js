@@ -12,10 +12,10 @@ export const API_BASE = sanitizeBase(
 export const ENDPOINTS = Object.freeze({
   health: `${API_BASE}/get/health`,
   offline: `${API_BASE}/get/offline`,
-  debugPaths: `${API_BASE}/get/debug-paths`,
   questionnaire: `${API_BASE}/questionnaire`,
   preview: `${API_BASE}/preview`,
   checkout: `${API_BASE}/create-checkout-session`,
+  createDownloadToken: `${API_BASE}/create-download-token`,
   receipt: `${API_BASE}/receipt`,
   downloadBySession: `${API_BASE}/download-by-session`,
 });
