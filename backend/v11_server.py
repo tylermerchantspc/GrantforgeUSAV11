@@ -267,19 +267,27 @@ def fallback_grants_gov_url(title: str, tags: List[str]) -> str:
     return f"https://www.grants.gov/search-grants?keywords={q.replace(' ', '%20')}"
 
 
+def _safe_grants_url(url: str, title: str, tags: List[str]) -> str:
+    """Only allow modern Grants.gov links; otherwise use search fallback."""
+    if isinstance(url, str) and url.startswith(("http://", "https://")) and "grants.gov" in url:
+        lowered = url.lower()
+        if "apply07.grants.gov" in lowered or "grantsws/rest/opportunities/details" in lowered:
+            return fallback_grants_gov_url(title, tags)
+        return url
+    return fallback_grants_gov_url(title, tags)
+
+
 # -------- URL normalizer (force Grants.gov or fallback to its search) --------
 def _ensure_http_url(url: str, title: str, tags: List[str]) -> str:
-    if isinstance(url, str) and url.startswith(("http://", "https://")) and "grants.gov" in url:
-        return url
-    return fallback_grants_gov_url(title or "", tags or [])
+    return _safe_grants_url(url, title or "", tags or [])
 
 
 def grant_display_url(gr: Dict[str, Any]) -> str:
     """
     Prefer direct Grants.gov opportunity links when possible.
     Fallback order:
-      1) funding_url/program_url if valid grants.gov URL
-      2) details endpoint built from opportunity ID/number
+      1) official_url if valid modern grants.gov URL
+      2) funding_url/program_url if valid modern grants.gov URL
       3) grants.gov search URL
     """
     opp_id = str(
@@ -300,15 +308,13 @@ def grant_display_url(gr: Dict[str, Any]) -> str:
     if official_url:
         return _ensure_http_url(official_url, gr.get("title", ""), gr.get("tags", []) or [])
 
-    if opp_id or opp_number:
-        query = f"oppId={opp_id or opp_number}"
-        if opp_number:
-            query += f"&oppNumber={opp_number}"
-        return f"https://www.grants.gov/grantsws/rest/opportunities/details?{query}"
-
     raw = gr.get("funding_url") or gr.get("program_url") or ""
-    if isinstance(raw, str) and raw.startswith(("http://", "https://")) and "grants.gov" in raw and "search-grants" not in raw:
-        return raw
+    if raw:
+        return _safe_grants_url(raw, gr.get("title", ""), gr.get("tags", []) or [])
+
+    if opp_id or opp_number:
+        q = " ".join([gr.get("title", ""), opp_id, opp_number]).strip()
+        return fallback_grants_gov_url(q, gr.get("tags", []) or [])
 
     return fallback_grants_gov_url(gr.get("title", ""), gr.get("tags", []) or [])
 
@@ -368,45 +374,63 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
     score = 0
     fit_notes: List[str] = []
     applicant_type = normalize_applicant_type(category)
+    grant_sector = (gr.get("sector") or "").lower()
+    requested_sector = infer_client_sector(kws)
 
     # 1) eligibility (already gated, but weighted highest)
     score += 100
     fit_notes.append(f"Eligibility matched for {applicant_type}.")
 
-    # 4) funding similarity
+    # 2) sector relevance (after eligibility gate)
+    if requested_sector and grant_sector:
+        if requested_sector == grant_sector:
+            score += 35
+            fit_notes.append(f"Sector aligned: {requested_sector}.")
+        else:
+            score -= 45
+            fit_notes.append(f"Sector mismatch: client {requested_sector}, program {grant_sector}.")
+
+    # 3) keyword overlap
+    tags = normalized_tags(gr.get("tags", []))
+    summary_tokens = normalized_tags(_norm_words(gr.get("summary", "")))
+    keyword_terms = set()
+    for token in kws:
+        keyword_terms.update([w for w in token.split() if len(w) > 2])
+    grant_terms = set()
+    for token in (tags + summary_tokens):
+        grant_terms.update([w for w in token.split() if len(w) > 2])
+    overlap = (set(kws) & (set(tags) | set(summary_tokens))) | (keyword_terms & grant_terms)
+    if overlap:
+        score += min(len(overlap), 5) * 8
+        fit_notes.append("Keyword overlap: " + ", ".join(sorted(overlap)) + ".")
+    else:
+        score -= 25
+        fit_notes.append("Weak keyword overlap with this opportunity.")
+
+    # 4) funding fit
     min_amt = _safe_float(gr.get("min_amount"), 0.0)
     max_amt = _safe_float(gr.get("max_amount"), 10**12)
     if amount < min_amt:
+        score -= 12
         fit_notes.append(f"Ask (${amount:,.0f}) is below minimum (${min_amt:,.0f}).")
     elif amount > max_amt:
+        over_ratio = (amount / max_amt) if max_amt > 0 else 2
+        if over_ratio >= 1.75:
+            score -= 55
+        elif over_ratio >= 1.25:
+            score -= 35
+        else:
+            score -= 18
         fit_notes.append(f"Ask (${amount:,.0f}) exceeds maximum (${max_amt:,.0f}).")
     else:
-        score += 5
-
-    # 2) keyword overlap
-    tags = normalized_tags(gr.get("tags", []))
-    overlap = set(kws) & set(tags)
-    if overlap:
-        score += min(len(overlap), 3) * 10
-        fit_notes.append("Good overlap with focus areas: " + ", ".join(sorted(overlap)) + ".")
-    else:
-        fit_notes.append("Limited keyword overlap with focus areas.")
-
-    # 3) category relevance
-    elig_text = " ".join([str(e).lower() for e in gr.get("eligible_types", [])])
-    if applicant_type == "SMALL_BUSINESS" and any(t in elig_text for t in ["small business", "startup", "for-profit", "smb"]):
-        score += 8
-    elif applicant_type == "GOV_LOCAL" and any(t in elig_text for t in ["municipality", "city", "county", "local government", "tribal"]):
-        score += 8
-    elif applicant_type == "EDU" and any(t in elig_text for t in ["school", "district", "educator", "teacher", "k12", "classroom"]):
-        score += 8
-    elif applicant_type == "NONPROFIT" and any(t in elig_text for t in ["501", "nonprofit", "faith", "church", "community organization"]):
-        score += 8
+        score += 12
 
     # deadline
+    # 5) deadline validity
     if _deadline_ok(gr.get("deadline", "")):
-        score += 1
+        score += 6
     else:
+        score -= 30
         fit_notes.append("Deadline has passed.")
 
     # match % note
@@ -414,8 +438,26 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
     if req_match > 0:
         fit_notes.append(f"Requires approximately {req_match}% local match (cash or in-kind).")
 
-    fit = "Strong Match" if score >= 120 else "Possible Match" if score >= 105 else "Low Match"
+    fit = "Strong Match" if score >= 130 else "Possible Match" if score >= 95 else "Low Match"
     return {"score": score, "fit": fit, "fit_notes": " ".join(fit_notes)}
+
+
+def infer_client_sector(kws: List[str]) -> str:
+    keyword_blob = " ".join(kws)
+    sector_rules = [
+        ("telehealth / healthcare", ["telehealth", "health", "healthcare", "patient", "clinic", "elderly", "remote monitoring", "digital health"]),
+        ("workforce development", ["workforce", "apprenticeship", "credential", "certification", "skilled trades", "manufacturing", "upskilling"]),
+        ("education / STEM", ["education", "school", "classroom", "teacher", "stem", "student", "after school"]),
+        ("housing / community development", ["housing", "community development", "revitalization", "homeless", "neighborhood"]),
+        ("public safety / emergency management", ["public safety", "emergency", "flood", "disaster", "mitigation", "response"]),
+        ("conservation / environment", ["conservation", "wetlands", "habitat", "ecosystem", "climate", "restoration", "wildlife"]),
+        ("arts / culture", ["arts", "culture", "storytelling", "creative", "media", "youth empowerment"]),
+        ("entrepreneurship / innovation", ["innovation", "startup", "prototype", "research", "commercialization", "entrepreneurship"]),
+    ]
+    for sector, needles in sector_rules:
+        if any(n in keyword_blob for n in needles):
+            return sector
+    return ""
 
 
 def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
@@ -428,10 +470,14 @@ def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
         return applicant_type == "SMALL_BUSINESS"
     if "cdbg" in haystack:
         return applicant_type == "GOV_LOCAL"
-    if any(k in haystack for k in ["education", "classroom", "school", "district", "titlei", "stem", "robotics", "perkins"]):
+    if any(k in haystack for k in ["classroom", "school", "district", "titlei", "stem", "robotics", "perkins", "teacher"]):
         return applicant_type == "EDU"
+    if any(k in haystack for k in ["city", "municipality", "public safety", "hazard mitigation", "cdbg", "bric"]):
+        return applicant_type == "GOV_LOCAL"
+    if any(k in haystack for k in ["apprenticeship", "manufacturing workforce", "skilled trades"]):
+        return applicant_type in ("SMALL_BUSINESS", "NONPROFIT")
 
-    if applicant_type == "NONPROFIT" and any(k in haystack for k in ["telecom", "telecommunications", "broadband", "fiber", "infrastructure"]):
+    if applicant_type == "NONPROFIT" and any(k in haystack for k in ["telecom", "telecommunications", "broadband", "fiber"]):
         return False
 
     elig = " ".join([str(e).lower() for e in gr.get("eligible_types", [])])
@@ -441,7 +487,7 @@ def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
         return any(t in elig for t in ["municipality", "city", "county", "local government", "tribal"])
     if applicant_type == "EDU":
         return any(t in elig for t in ["school", "district", "teacher", "educator", "k12", "classroom"])
-    return any(t in elig for t in ["501", "nonprofit", "faith", "church", "community organization"])
+    return any(t in elig for t in ["501", "nonprofit", "community", "community-based organization", "health network"])
 
 
 def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
@@ -474,6 +520,8 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
             continue
 
         s = score_grant(gr, category, kws, amount)
+        if s["score"] < 95:
+            continue
 
         url = grant_display_url(gr)
         row = {
@@ -483,6 +531,7 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
             "program_id": gr.get("program_id", ""),
             "opp_id": gr.get("opp_id") or gr.get("opportunity_id") or "",
             "opp_number": gr.get("opp_number") or gr.get("opportunity_number") or "",
+            "official_url": grant_display_url(gr),
             "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
             "deadline": close_date or "TBA",
             "fit": s["fit"],
@@ -491,6 +540,8 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
             "requires_match_percent": gr.get("requires_match_percent", 0),
             "max_amount": _safe_float(gr.get("max_amount"), 0),
             "tags": gr.get("tags", []),
+            "sector": gr.get("sector", ""),
+            "summary": gr.get("summary", ""),
             "level": "Federal",
         }
         if is_expired and not include_expired:
@@ -604,116 +655,121 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     audience = (intake.get("audience") or "participants").strip().rstrip(".")
     timeline = (intake.get("timeline") or "12 months").strip().rstrip(".")
     notes = (intake.get("notes") or "").strip()
+    stated_need = (intake.get("need") or "").strip()
 
     amount = _safe_float(intake.get("amountRequested"))
     annual_budget = _safe_float(intake.get("annualBudget"), 0)
     keywords_str = (intake.get("keywords") or "").strip()
     kws = normalized_keywords(keywords_str)
+    client_sector = infer_client_sector(kws) or "community impact"
 
     g_title = grant.get("title") or "Selected federal opportunity"
     g_deadline = grant.get("deadline") or "TBA"
     g_match = int(grant.get("requires_match_percent", 0) or 0)
     g_max = _safe_float(grant.get("max_amount"), 0)
-    g_tags = grant.get("tags", []) or []
     g_url = grant_display_url(grant) if grant else ""
 
     req_str = f"${amount:,.0f}" if amount > 0 else "a competitive request amount"
+    aligned_request = min(amount, g_max) if (amount > 0 and g_max > 0) else amount
+    aligned_req_str = f"${aligned_request:,.0f}" if aligned_request > 0 else req_str
+
     budget_context = (
-        f"The organization currently operates with an estimated annual budget of ${annual_budget:,.0f}."
+        f"The organization currently operates with an estimated annual budget of ${annual_budget:,.0f}, which provides sufficient financial infrastructure to manage reimbursable and performance-based grant activities."
         if annual_budget > 0 else
-        "The organization operates with disciplined financial controls and documented stewardship practices."
+        "The organization maintains financial controls, procurement standards, and board-level oversight to support federal grants management and audit readiness."
     )
-    priority_topics = ", ".join(g_tags[:5]) if g_tags else "the published federal priorities"
-    keyword_focus = keywords_str or "the identified community priorities"
+
+    need_context = stated_need or notes or (
+        "The project addresses access barriers, service coordination gaps, and uneven resource distribution that limit outcomes for the intended population."
+    )
 
     objectives = _mk_objectives_from_keywords(kws, audience)
     if not objectives:
         objectives = [
             "Deliver high-quality services through a structured program model tied to measurable milestones.",
-            "Increase participation and retention among the intended audience across the full implementation period.",
-            "Demonstrate outcomes with consistent performance monitoring and evidence-based course corrections.",
+            "Increase participation and retention among the intended audience across the implementation period.",
+            "Demonstrate measurable outcomes using consistent performance monitoring and continuous improvement.",
         ]
 
     sections = []
     sections.append(
         "Executive Summary\n"
-        f"{org} seeks support through the {g_title} opportunity to implement \"{proj_title}\", a focused initiative serving {audience}. "
-        f"The proposed request is {req_str}, aligned to project scope, allowable costs, and federal compliance expectations. "
-        f"The proposed work is designed to advance {keyword_focus} through a practical implementation model that can begin immediately after award and scale responsibly over time. "
-        f"As a {category}, {org} will use this investment to strengthen direct services, improve participant outcomes, and build long-term capacity. "
-        f"The project schedule is planned for {timeline}, with key milestones for launch, service delivery, monitoring, and closeout."
+        f"{org} respectfully submits this proposal foundation for the {g_title} opportunity to advance '{proj_title}' for {audience}. "
+        f"The proposed request is {req_str}, designed around a practical implementation strategy in the {client_sector} sector. "
+        f"The initiative responds to documented local barriers and will deploy targeted interventions over {timeline} with clear management milestones, partner accountability, and measurable deliverables. "
+        f"As a {category}, {org} is positioned to execute responsibly, align spending to allowable costs, and report outcomes in a reviewer-friendly format. "
+        f"The project combines direct service delivery, infrastructure support, and evaluation activities so that the funded work produces immediate impact while building sustainable long-term capacity."
     )
-
     sections.append(
         "Statement of Need\n"
-        f"The target population currently faces avoidable barriers that limit consistent access to quality programming and support. "
-        f"Local stakeholders have identified persistent needs connected to {keyword_focus}, including uneven resource availability, staffing pressure, and program fragmentation. "
-        f"Without focused intervention, {audience} are likely to experience reduced continuity of services and weaker long-term outcomes. "
-        f"{notes if notes else 'Program records and stakeholder feedback indicate that strategic investment is required to stabilize services, expand access, and improve measurable results across the service area.'} "
-        "This proposal responds to those documented conditions with a targeted plan that is feasible, accountable, and aligned with federal funding priorities."
+        f"The need for this project is immediate and well documented: {need_context} "
+        f"Current conditions affecting {audience} include inconsistent access, delayed service engagement, and preventable outcomes that could be improved through earlier, coordinated intervention. "
+        f"Community stakeholders have repeatedly identified priority issues connected to {keywords_str or 'core community needs'}, and existing resources are not sufficient to close these gaps at the speed or scale required. "
+        "Without investment, the target population is likely to continue experiencing fragmented support and avoidable harm. "
+        "This proposal is intentionally designed to close those gaps through a focused, evidence-informed model that pairs operational discipline with participant-centered delivery."
     )
-
     sections.append(
-        "Program Description\n"
-        f"\"{proj_title}\" will be delivered through a structured service model with clear phases for mobilization, implementation, and continuous improvement. "
-        "Initial work will finalize staff responsibilities, procure approved materials, and confirm delivery schedules. "
-        "Program operations will then move into regular service delivery with documented participant touchpoints, quality controls, and periodic leadership reviews. "
-        "The design emphasizes operational discipline, transparent reporting, and timely adaptations when performance data indicates the need for adjustment. "
-        f"Activities remain aligned to {priority_topics} and the core program objectives established by the funding notice."
+        "Program Design\n"
+        "The proposed program design translates strategy into execution by combining staffing, service protocols, and practical tools that address the root barriers described above. "
+        f"Project activities will include: (1) direct program services for {audience}; (2) deployment of project resources and equipment needed for reliable delivery; and (3) structured care and coordination workflows that improve continuity and follow-through. "
+        "The design uses phased implementation to ensure that the first months establish quality standards, compliance controls, and partner expectations before full-scale rollout. "
+        f"Operationally, the project will focus on {keywords_str or 'priority service areas'} while maintaining flexibility to adjust delivery methods based on monthly performance data. "
+        "All program components are built to satisfy federal grant standards for eligibility, documentation, and measurable outcomes."
     )
-
     sections.append(
         "Target Population\n"
-        f"The primary beneficiaries are {audience}, with outreach strategies tailored to improve participation among those who face the highest barriers to access. "
-        "Recruitment and retention plans will use trusted channels, partner referrals, and culturally responsive communication. "
-        "Service design will prioritize equity, continuity, and participant safety while maintaining clear eligibility and attendance standards. "
-        "By centering delivery around the intended audience profile, the project can produce stronger engagement, better completion trends, and more durable outcomes."
+        f"The target population for this initiative is {audience}. "
+        "Recruitment and engagement will prioritize individuals and households that face the highest barriers to access, including transportation constraints, digital access limitations, unstable income, or limited availability of local services. "
+        "Program communications will be delivered through trusted institutions and community partners to reduce participation friction and improve retention over time. "
+        "Service delivery protocols will emphasize cultural responsiveness, language accessibility where needed, and practical scheduling that reflects participant realities. "
+        "By aligning outreach, enrollment, and service cadence to the lived conditions of the target population, the project is expected to improve both participation quality and outcome durability."
     )
-
     sections.append(
         "Implementation Plan\n"
-        f"Implementation will proceed over {timeline} with a milestone-based management structure. "
-        "Month 1 focuses on onboarding, procurement, and baseline setup. "
-        "Months 2 through 9 prioritize direct service delivery, quality assurance, and partner coordination. "
-        "Final months concentrate on performance analysis, sustainability transition steps, and closeout reporting. "
-        "Program leadership will hold routine check-ins to address risks early, monitor spending against approved categories, and maintain alignment with grant requirements. "
-        "Key objectives include: " + " ".join([f"({i+1}) {obj}" for i, obj in enumerate(objectives[:3])])
+        f"Implementation will proceed over {timeline} with a milestone-based structure. "
+        "Month 1 will focus on startup activities, partner onboarding, baseline metrics, and procurement setup. "
+        "Months 2 through 9 will focus on full service delivery, case coordination, and monthly quality-improvement reviews. "
+        "Final months will emphasize performance validation, sustainability transition steps, and closeout readiness. "
+        "Leadership will conduct routine implementation reviews and maintain auditable records for spending, outputs, and participant outcomes. "
+        "Key objectives include: " + " ".join([f"({i+1}) {obj}" for i, obj in enumerate(objectives[:4])])
     )
-
     sections.append(
         "Expected Outcomes\n"
-        "The project is expected to improve access, participation consistency, and measurable progress for enrolled participants. "
-        "Outcome tracking will include service volume, completion indicators, and performance data tied to program goals. "
-        "Leadership will review monthly dashboards to identify trends and implement corrective actions when needed. "
-        "By the end of the grant period, the organization expects stronger participant outcomes, improved operational reliability, and a validated implementation model suitable for continuation."
+        f"Expected outcomes include improved access, higher engagement consistency, and measurable gains for {audience}. "
+        "The project will track both output and outcome indicators, including participation volume, service completion rates, timeliness, and targeted performance benchmarks tied to the core intervention model. "
+        "Management will review monthly dashboards and implement corrective actions when indicators fall below target thresholds. "
+        "By the end of the grant period, the organization expects to demonstrate a replicable model with stronger participant outcomes, improved operational reliability, and clear evidence of return on public investment."
     )
-
     sections.append(
         "Organizational Capacity\n"
-        f"{org} has the administrative and programmatic foundation required to manage federal grant activities responsibly. "
+        f"{org} has the leadership structure and operational maturity to manage this grant effectively. "
         f"{budget_context} "
-        "The organization maintains defined oversight responsibilities for program leadership, financial controls, procurement, and reporting compliance. "
-        "Staff and partner roles will be documented at project launch, and leadership will maintain an auditable record of implementation decisions, expenditures, and performance milestones."
+        "Program governance includes defined responsibilities for executive oversight, fiscal management, procurement, and performance reporting. "
+        "Internal controls include expenditure documentation, segregation of duties, and regular management review of deliverables and compliance milestones. "
+        "The organization also maintains community partnerships that support referrals, implementation coordination, and continuity of services beyond the grant period."
     )
 
-    funding_range = f" (up to approximately ${g_max:,.0f})" if g_max > 0 else ""
-    match_clause = f"The plan includes a strategy to satisfy the required {g_match}% match through eligible cash or in-kind contributions. " if g_match > 0 else ""
+    budget_alignment_clause = ""
+    if g_max > 0 and amount > g_max:
+        budget_alignment_clause = (
+            f" Because the current request exceeds the published award ceiling, this draft aligns the proposed budget narrative to an allowable amount of approximately {aligned_req_str} while preserving core project outcomes through phased implementation."
+        )
+    match_clause = f" The budget also includes a strategy to satisfy the required {g_match}% match through eligible cash and in-kind contributions." if g_match > 0 else ""
     sections.append(
         "Budget Use\n"
-        f"Requested funds ({req_str}) will support allowable direct costs such as personnel time, program materials, essential supplies, delivery supports, and evaluation activities. "
-        "Every expense category will be tied to implementation milestones and documented outputs. "
-        f"The request is scoped with awareness of the published funding range{funding_range}. "
-        f"{match_clause}"
-        "Financial reporting will follow federal standards and the final award conditions."
+        f"Requested funds ({req_str}) will be allocated to allowable categories such as personnel, program supplies, technology/equipment, participant supports, data and evaluation, and grant administration required for compliant delivery. "
+        "Each budget category will be tied directly to implementation milestones and documented outputs to ensure transparent use of funds. "
+        f"The spending plan is designed for fiscal discipline and audit readiness, with monthly reconciliation and variance review.{budget_alignment_clause}{match_clause} "
+        "No unsupported or non-allowable costs are assumed in this draft framework, and final line-item detail should be refined against the selected opportunity guidance before submission."
     )
-
     sections.append(
         "Sustainability\n"
-        "Sustainability planning begins during implementation rather than at closeout. "
-        "The organization will document effective components, embed efficient practices into routine operations, and maintain partner engagement to preserve service continuity. "
-        "Performance findings will inform future funding strategies and support replication of successful elements. "
-        f"Prior to submission, leadership will re-verify eligibility, deadlines, and compliance details for {g_title} (deadline: {g_deadline})."
+        "Sustainability planning begins at project launch rather than at closeout. "
+        "The organization will document successful workflows, integrate high-performing practices into routine operations, and formalize partner commitments that can continue beyond the initial award period. "
+        "Performance findings will be used to inform future applications, braided funding strategies, and strategic budgeting decisions that protect service continuity for the target population. "
+        f"Prior to submission, leadership should re-verify eligibility, deadlines, and compliance details for {g_title} (deadline: {g_deadline})."
         + (f" Official opportunity details: {g_url}." if g_url else "")
+        + " Review and edit all draft materials before submission."
     )
 
     return "\n\n".join(sections)
@@ -752,7 +808,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
         c.drawString(
             left_margin,
             bottom_margin - 12,
-            "Draft prepared using proprietary software. Review and edit before submission. All sales final. No refunds.",
+            "Review and edit all draft materials before submission. All sales final. No refunds.",
         )
         c.drawRightString(right_margin, bottom_margin - 12, f"Page {page_num}")
 

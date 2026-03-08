@@ -1,237 +1,132 @@
 [
   {
-    "title": "Community Development Block Grant (CDBG)",
-    "program_url": "https://www.grants.gov/search-grants?keywords=Community%20Development%20Block%20Grant%20CDBG",
-    "deadline": "2027-12-31",
-    "min_amount": 5000,
+    "title": "HRSA Rural Health Care Services Outreach Program",
+    "official_url": "https://www.grants.gov/search-grants?keywords=HRSA%20Rural%20Health%20Care%20Services%20Outreach%20Program",
+    "opportunity_number": "HRSA-25-122",
+    "deadline": "2027-03-15",
+    "close_date": "2027-03-15",
+    "min_amount": 100000,
     "max_amount": 500000,
-    "eligible_types": [
-      "municipality",
-      "city",
-      "county",
-      "local government",
-      "tribal",
-      "community development"
-    ],
-    "tags": [
-      "community",
-      "infrastructure",
-      "housing",
-      "revitalization"
-    ],
-    "requires_match_percent": 10,
-    "geo_scope": "South",
-    "opportunity_id": "GFUSA-1001",
-    "official_url": "https://www.grants.gov/search-grants?keywords=Community%20Development%20Block%20Grant%20CDBG",
-    "close_date": "2027-12-31"
+    "eligible_types": ["501c3 nonprofit", "nonprofit", "rural health network", "community health organization"],
+    "tags": ["rural health", "telehealth", "care coordination", "chronic disease", "elderly care"],
+    "sector": "telehealth / healthcare",
+    "summary": "Supports rural providers and nonprofit health networks delivering expanded access to care, including telehealth-enabled services for underserved populations."
   },
   {
-    "title": "Safe Streets and Roads for All (SS4A)",
-    "program_url": "https://www.grants.gov/search-grants?keywords=Safe%20Streets%20and%20Roads%20for%20All%20SS4A",
-    "deadline": "2027-12-31",
-    "min_amount": 25000,
-    "max_amount": 200000,
-    "eligible_types": [
-      "municipality",
-      "city",
-      "county",
-      "transportation",
-      "public works"
-    ],
-    "tags": [
-      "transportation",
-      "safety",
-      "infrastructure",
-      "vision zero"
-    ],
-    "requires_match_percent": 20,
-    "geo_scope": "Northeast",
-    "opportunity_id": "GFUSA-1002",
-    "official_url": "https://www.grants.gov/search-grants?keywords=Safe%20Streets%20and%20Roads%20for%20All%20SS4A",
-    "close_date": "2027-12-31"
+    "title": "USDA Distance Learning and Telemedicine Grant Program",
+    "official_url": "https://www.grants.gov/search-grants?keywords=USDA%20Distance%20Learning%20and%20Telemedicine%20Grant%20Program",
+    "opportunity_number": "RUS-25-01-DLT",
+    "deadline": "2027-04-30",
+    "close_date": "2027-04-30",
+    "min_amount": 50000,
+    "max_amount": 1000000,
+    "eligible_types": ["nonprofit", "school", "hospital", "tribal", "local government", "consortium"],
+    "tags": ["telehealth", "remote patient monitoring", "rural healthcare", "digital access", "broadband-enabled care"],
+    "sector": "telehealth / healthcare",
+    "summary": "Funds equipment and technology that expand rural telemedicine and distance services, including clinical access points and remote care infrastructure."
   },
   {
-    "title": "Small Business Innovation Research (SBIR) \u2013 Starter",
-    "program_url": "https://www.grants.gov/search-grants?keywords=Small%20Business%20Innovation%20Research%20SBIR",
-    "deadline": "2027-12-31",
-    "min_amount": 15000,
-    "max_amount": 75000,
-    "eligible_types": [
-      "small business",
-      "startup",
-      "for-profit",
-      "smb",
-      "microenterprise"
-    ],
-    "tags": [
-      "innovation",
-      "technology",
-      "product development",
-      "R&D"
-    ],
-    "requires_match_percent": 10,
-    "geo_scope": "Southwest",
-    "opportunity_id": "GFUSA-1003",
-    "official_url": "https://www.grants.gov/search-grants?keywords=Small%20Business%20Innovation%20Research%20SBIR",
-    "close_date": "2027-12-31"
+    "title": "Appalachian Regional Commission INSPIRE Initiative",
+    "official_url": "https://www.grants.gov/search-grants?keywords=Appalachian%20Regional%20Commission%20INSPIRE%20Initiative",
+    "opportunity_number": "ARC-INSPIRE-2027",
+    "deadline": "2027-05-10",
+    "close_date": "2027-05-10",
+    "min_amount": 100000,
+    "max_amount": 2000000,
+    "eligible_types": ["nonprofit", "local government", "higher education", "economic development organization"],
+    "tags": ["health workforce", "substance use recovery", "community health", "workforce pathways"],
+    "sector": "workforce development",
+    "summary": "Supports regional projects improving health outcomes and workforce participation in distressed communities, with emphasis on long-term economic resilience."
   },
   {
-    "title": "USDA ReConnect \u2013 Rural Broadband",
-    "program_url": "https://www.grants.gov/search-grants?keywords=USDA%20ReConnect%20rural%20broadband",
-    "deadline": "2027-12-31",
-    "min_amount": 20000,
-    "max_amount": 250000,
-    "eligible_types": [
-      "municipality",
-      "county",
-      "cooperative",
-      "utility",
-      "telecom",
-      "nonprofit"
-    ],
-    "tags": [
-      "rural",
-      "internet",
-      "infrastructure",
-      "technology"
-    ],
-    "requires_match_percent": 15,
-    "geo_scope": "West",
-    "opportunity_id": "GFUSA-1004",
-    "official_url": "https://www.grants.gov/search-grants?keywords=USDA%20ReConnect%20rural%20broadband",
-    "close_date": "2027-12-31"
+    "title": "DOL Apprenticeship Building America Grant Program",
+    "official_url": "https://www.grants.gov/search-grants?keywords=DOL%20Apprenticeship%20Building%20America%20Grant%20Program",
+    "opportunity_number": "FOA-ETA-27-ABA",
+    "deadline": "2027-02-28",
+    "close_date": "2027-02-28",
+    "min_amount": 500000,
+    "max_amount": 6000000,
+    "eligible_types": ["small business", "industry partnership", "nonprofit", "workforce board", "community college"],
+    "tags": ["apprenticeship", "skilled trades", "manufacturing workforce", "credentialing", "employer partnerships"],
+    "sector": "workforce development",
+    "summary": "Expands registered apprenticeship pipelines in high-demand sectors through employer-led training, credential pathways, and workforce partnerships."
   },
   {
-    "title": "21st Century Community Learning Centers (After-School)",
-    "program_url": "https://www.grants.gov/search-grants?keywords=21st%20Century%20Community%20Learning%20Centers%2021st%20CCLC",
-    "deadline": "2027-12-31",
-    "min_amount": 5000,
-    "max_amount": 30000,
-    "eligible_types": [
-      "501",
-      "nonprofit",
-      "school",
-      "district",
-      "community organization",
-      "youth center"
-    ],
-    "tags": [
-      "education",
-      "youth",
-      "after-school",
-      "tutoring",
-      "mentorship"
-    ],
-    "requires_match_percent": 0,
-    "geo_scope": "Midwest",
-    "opportunity_id": "GFUSA-1005",
-    "official_url": "https://www.grants.gov/search-grants?keywords=21st%20Century%20Community%20Learning%20Centers%2021st%20CCLC",
-    "close_date": "2027-12-31"
+    "title": "Small Business Innovation Research (SBIR) Phase I",
+    "official_url": "https://www.grants.gov/search-grants?keywords=Small%20Business%20Innovation%20Research%20Phase%20I",
+    "opportunity_number": "SBIR-2027-01",
+    "deadline": "2027-06-01",
+    "close_date": "2027-06-01",
+    "min_amount": 150000,
+    "max_amount": 350000,
+    "eligible_types": ["small business", "for-profit", "startup"],
+    "tags": ["innovation", "research and development", "prototype", "commercialization"],
+    "sector": "entrepreneurship / innovation",
+    "summary": "Supports U.S. small businesses conducting early-stage R&D with strong commercialization potential in federally relevant priority areas."
   },
   {
-    "title": "Perkins V \u2013 CTE Equipment & Pathways",
-    "program_url": "https://www.grants.gov/search-grants?keywords=Perkins%20V%20career%20technical%20education",
-    "deadline": "2027-12-31",
+    "title": "EPA Community Change Grants",
+    "official_url": "https://www.grants.gov/search-grants?keywords=EPA%20Community%20Change%20Grants",
+    "opportunity_number": "EPA-CCG-2027",
+    "deadline": "2027-07-31",
+    "close_date": "2027-07-31",
+    "min_amount": 100000,
+    "max_amount": 20000000,
+    "eligible_types": ["nonprofit", "community-based organization", "tribal", "local government"],
+    "tags": ["climate resilience", "air quality", "community health", "environmental justice", "neighborhood infrastructure"],
+    "sector": "conservation / environment",
+    "summary": "Funds place-based environmental and climate resilience projects that reduce pollution burdens and improve health and infrastructure in underserved communities."
+  },
+  {
+    "title": "NOAA Transformational Habitat Restoration and Coastal Resilience Grants",
+    "official_url": "https://www.grants.gov/search-grants?keywords=NOAA%20Transformational%20Habitat%20Restoration%20and%20Coastal%20Resilience%20Grants",
+    "opportunity_number": "NOAA-NMFS-HR-2027-2008240",
+    "deadline": "2027-05-20",
+    "close_date": "2027-05-20",
+    "min_amount": 1000000,
+    "max_amount": 100000000,
+    "eligible_types": ["nonprofit", "state government", "local government", "tribal", "higher education"],
+    "tags": ["wetlands restoration", "wildlife habitat", "ecosystem restoration", "resilience", "nature-based solutions"],
+    "sector": "conservation / environment",
+    "summary": "Supports large-scale restoration of coastal and aquatic habitats to improve ecosystem health, protect communities, and strengthen climate resilience."
+  },
+  {
+    "title": "FEMA Building Resilient Infrastructure and Communities (BRIC)",
+    "official_url": "https://www.grants.gov/search-grants?keywords=FEMA%20Building%20Resilient%20Infrastructure%20and%20Communities%20BRIC",
+    "opportunity_number": "DHS-24-FEMA-BRIC",
+    "deadline": "2027-01-31",
+    "close_date": "2027-01-31",
+    "min_amount": 100000,
+    "max_amount": 50000000,
+    "eligible_types": ["city", "municipality", "county", "local government", "tribal"],
+    "tags": ["flood mitigation", "public safety infrastructure", "resilience planning", "hazard mitigation", "emergency management"],
+    "sector": "public safety / emergency management",
+    "summary": "Funds local and tribal hazard-mitigation infrastructure that reduces disaster risk, including flood and resilience technology projects."
+  },
+  {
+    "title": "HUD Community Development Block Grant (CDBG)",
+    "official_url": "https://www.grants.gov/search-grants?keywords=HUD%20Community%20Development%20Block%20Grant%20CDBG",
+    "opportunity_number": "CDBG-ENT-2027",
+    "deadline": "2027-08-15",
+    "close_date": "2027-08-15",
+    "min_amount": 100000,
+    "max_amount": 5000000,
+    "eligible_types": ["city", "municipality", "county", "local government", "state government"],
+    "tags": ["housing", "community development", "public facilities", "economic development", "low- and moderate-income communities"],
+    "sector": "housing / community development",
+    "summary": "Provides formula and competitive funding for community development, neighborhood revitalization, and infrastructure benefiting low- and moderate-income residents."
+  },
+  {
+    "title": "NEA Grants for Arts Projects",
+    "official_url": "https://www.grants.gov/search-grants?keywords=NEA%20Grants%20for%20Arts%20Projects",
+    "opportunity_number": "2027NEAP1GAP",
+    "deadline": "2027-02-14",
+    "close_date": "2027-02-14",
     "min_amount": 10000,
-    "max_amount": 60000,
-    "eligible_types": [
-      "school",
-      "district",
-      "k12",
-      "technical center",
-      "vocational school",
-      "cte program"
-    ],
-    "tags": [
-      "CTE",
-      "equipment",
-      "workforce",
-      "career training"
-    ],
-    "requires_match_percent": 5,
-    "geo_scope": "Great Lakes",
-    "opportunity_id": "GFUSA-1006",
-    "official_url": "https://www.grants.gov/search-grants?keywords=Perkins%20V%20career%20technical%20education",
-    "close_date": "2027-12-31"
-  },
-  {
-    "title": "Faith & Neighborhood Partnerships \u2013 Outreach Microgrants",
-    "program_url": "https://www.grants.gov/search-grants?keywords=faith%20based%20community%20outreach%20microgrant",
-    "deadline": "2027-12-31",
-    "min_amount": 1000,
-    "max_amount": 10000,
-    "eligible_types": [
-      "church",
-      "faith",
-      "faith-based",
-      "ministry",
-      "501",
-      "community outreach"
-    ],
-    "tags": [
-      "outreach",
-      "food",
-      "shelter",
-      "community",
-      "assistance"
-    ],
-    "requires_match_percent": 0,
-    "geo_scope": "Mid-Atlantic",
-    "opportunity_id": "GFUSA-1007",
-    "official_url": "https://www.grants.gov/search-grants?keywords=faith%20based%20community%20outreach%20microgrant",
-    "close_date": "2027-12-31"
-  },
-  {
-    "title": "Classroom Supplies & Mini-Equipment (Teacher Microgrant)",
-    "program_url": "https://www.grants.gov/search-grants?keywords=teacher%20classroom%20supplies%20mini%20grant",
-    "deadline": "2027-12-31",
-    "min_amount": 300,
-    "max_amount": 2000,
-    "eligible_types": [
-      "teacher",
-      "educator",
-      "classroom",
-      "school"
-    ],
-    "tags": [
-      "classroom",
-      "supplies",
-      "materials",
-      "technology",
-      "mini-grant",
-      "teacher"
-    ],
-    "requires_match_percent": 0,
-    "geo_scope": "US",
-    "opportunity_id": "GFUSA-1008",
-    "official_url": "https://www.grants.gov/search-grants?keywords=teacher%20classroom%20supplies%20mini%20grant",
-    "close_date": "2027-12-31"
-  },
-  {
-    "title": "STEM Classroom Innovation (Teacher-Led)",
-    "program_url": "https://www.grants.gov/search-grants?keywords=teacher%20STEM%20classroom%20innovation%20grant",
-    "deadline": "2027-12-31",
-    "min_amount": 1000,
-    "max_amount": 15000,
-    "eligible_types": [
-      "teacher",
-      "educator",
-      "classroom",
-      "school",
-      "district"
-    ],
-    "tags": [
-      "STEM",
-      "education",
-      "classroom",
-      "technology",
-      "innovation",
-      "teacher"
-    ],
-    "requires_match_percent": 0,
-    "geo_scope": "US",
-    "opportunity_id": "GFUSA-1009",
-    "official_url": "https://www.grants.gov/search-grants?keywords=teacher%20STEM%20classroom%20innovation%20grant",
-    "close_date": "2027-12-31"
+    "max_amount": 100000,
+    "eligible_types": ["nonprofit", "school district", "local government", "tribal"],
+    "tags": ["arts education", "creative entrepreneurship", "youth empowerment", "digital storytelling", "community media"],
+    "sector": "arts / culture",
+    "summary": "Supports public-facing arts programs that increase access, build local creative economies, and serve communities through high-quality cultural programming."
   }
 ]
