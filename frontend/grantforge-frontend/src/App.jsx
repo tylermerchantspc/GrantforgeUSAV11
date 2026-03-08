@@ -4,9 +4,9 @@ import {
   shortlist,
   getPreview,
   createCheckoutSession,
-  downloadUrlBySession,
-  receiptBySession,
-  API_BASE,
+  createDownloadToken,
+  downloadUrlByToken,
+  receiptByToken,
 } from "./fetcher";
 import "./App.css";
 
@@ -43,11 +43,12 @@ function ThanksScreen() {
 
     const poll = async () => {
       try {
-        const r = await receiptBySession(sid);
-        if (r && r.ok) {
-          setPaid(!!r.paid);
-          if (r.download_path) {
-            setUrl(`${API_BASE}${r.download_path}`);
+        const t = await createDownloadToken(sid);
+        if (t && t.ok && t.token) {
+          const r = await receiptByToken(t.token);
+          if (r && r.ok) {
+            setPaid(!!r.paid);
+            setUrl(downloadUrlByToken(t.token));
             return;
           }
         }
@@ -58,8 +59,7 @@ function ThanksScreen() {
       if (mounted && tries < 15) {
         setTimeout(poll, 2000);
       } else if (mounted && !url) {
-        // fallback: computed URL (even if webhook/receipt log lagged)
-        setUrl(downloadUrlBySession(sid));
+        setErr("Payment is still finalizing. Please refresh in a moment.");
       }
     };
 
@@ -80,7 +80,7 @@ function ThanksScreen() {
         {url ? (
           <p>
             <a id="downloadLink" href={url}>Download Draft PDF</a>
-            {!paid && <span className="muted" style={{ marginLeft: 8 }}>(finalizing… ok to click)</span>}
+            {!paid && <span className="muted" style={{ marginLeft: 8 }}>(payment finalizing)</span>}
           </p>
         ) : (
           <p className="error">{err || "Preparing your file..."}</p>
@@ -191,10 +191,9 @@ function IntakeApp() {
       </header>
 
       <section className="card">
-        <h2>Tell us about your project (Free Intake)</h2>
-        <p className="muted">
-          Free intake and recommendations. Flat fee: $2,500 per proposal draft. All sales final. No refunds.
-        </p>
+        <h2>Tell us about your project</h2>
+        <p className="muted">Flat fee: $2,500 per proposal draft. All sales final. No refunds.</p>
+        <p className="muted" style={{ marginTop: 4 }}>Provide brief answers. We will match your project to federal grant opportunities.</p>
         <p className="muted" style={{ marginTop: 4 }}>
           We do not guarantee funding and do not submit grants on your behalf.
         </p>
@@ -203,7 +202,7 @@ function IntakeApp() {
           <input
             value={org}
             onChange={e=>setOrg(e.target.value)}
-            placeholder="Your organization"
+            
           />
         </label>
 
@@ -224,7 +223,7 @@ function IntakeApp() {
           <input
             value={keywords}
             onChange={e=>setKeywords(e.target.value)}
-            placeholder="e.g., STEM, robotics, classroom equipment, Title 1"
+            
           />
         </label>
 
@@ -234,7 +233,7 @@ function IntakeApp() {
               type="number"
               value={amountRequested}
               onChange={e=>setAmountRequested(e.target.value)}
-              placeholder="e.g., 2500"
+              
             />
           </label>
           <label>Annual Budget (USD)
@@ -242,7 +241,7 @@ function IntakeApp() {
               type="number"
               value={annualBudget}
               onChange={e=>setAnnualBudget(e.target.value)}
-              placeholder="e.g., 60000"
+              
             />
           </label>
         </div>
@@ -251,7 +250,7 @@ function IntakeApp() {
           <input
             value={projectTitle}
             onChange={e=>setProjectTitle(e.target.value)}
-            placeholder="Short name of the project"
+            
           />
         </label>
 
@@ -259,7 +258,7 @@ function IntakeApp() {
           <input
             value={timeline}
             onChange={e=>setTimeline(e.target.value)}
-            placeholder="What do you need & when?"
+            
           />
         </label>
 
@@ -267,7 +266,7 @@ function IntakeApp() {
           <input
             value={audience}
             onChange={e=>setAudience(e.target.value)}
-            placeholder="Who is served (students, vets, etc.)"
+            
           />
         </label>
 
@@ -275,7 +274,7 @@ function IntakeApp() {
           <textarea
             value={notes}
             onChange={e=>setNotes(e.target.value)}
-            placeholder="Anything reviewers should know"
+            
             rows={3}
           />
         </label>
@@ -306,7 +305,7 @@ function IntakeApp() {
                       <span>
                         {" — up to "}{row.amount}
                         {" — Deadline "}{row.deadline}
-                        {" — Fit "}{row.fit}
+                        {" — "}{row.fit}
                       </span>
                     </div>
 
@@ -332,7 +331,7 @@ function IntakeApp() {
                       </div>
                     )}
 
-                    {row.fit_notes && <div className="notes">Fit notes: {row.fit_notes}</div>}
+                    {row.fit_notes && <div className="notes">Match notes: {row.fit_notes}</div>}
 
                     <div className="actions">
                       <button
@@ -340,7 +339,7 @@ function IntakeApp() {
                         disabled={!!previewBusy[row.title] || loading}
                         aria-busy={!!previewBusy[row.title]}
                       >
-                        {previewBusy[row.title] ? "Building preview…" : "See Preview Language (Free)"}
+                        {previewBusy[row.title] ? "Building preview…" : "See Preview Language"}
                       </button>
                       <button onClick={()=>handlePay(row)} disabled={loading}>
                         Generate Full Draft — $2,500

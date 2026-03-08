@@ -3,8 +3,9 @@
 #          REAL narrative draft generation, reliable PDF download
 #          (eager + webhook), contextual previews, and debug utilities.
 
-import os, json, glob, re
-from datetime import datetime, date
+import os, json, glob, re, secrets, threading, time
+from datetime import datetime, date, timedelta
+from collections import defaultdict, deque
 from typing import Dict, Any, List, Optional, Tuple
 
 from flask import Flask, request, jsonify, send_file
@@ -32,17 +33,31 @@ APP_MODE = os.getenv("APP_MODE", "test").lower()  # keep for environment-level b
 
 # ===== Writable storage (Render dynos can only write to /tmp) =====
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/tmp/grantforge_v11")
-PDF_DIR = os.path.join(OUTPUT_DIR, "pdfs")
-LOG_PATH = os.path.join(OUTPUT_DIR, "payments_log.csv")
+PROTECTED_DIR = os.path.join(OUTPUT_DIR, "protected")
+PDF_DIR = os.path.join(PROTECTED_DIR, "pdfs")
+LOG_PATH = os.path.join(PROTECTED_DIR, "payments_log.csv")
 
 DATA_DIR = os.getenv("DATA_DIR", "backend/data")
 GRANTS_PATH = os.path.join(DATA_DIR, "grants.json")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(PROTECTED_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 
 # Pricing
 FLAT_PRICE = 2500.00
+TOKEN_TTL_SECONDS = int(os.getenv("DOWNLOAD_TOKEN_TTL_SECONDS", str(24 * 60 * 60)))
+
+RATE_LIMITS = {
+    "/questionnaire": (20, 60),
+    "/preview": (10, 60),
+    "/create-checkout-session": (8, 60),
+}
+_RATE_BUCKETS: Dict[str, deque] = defaultdict(deque)
+_RATE_LOCK = threading.Lock()
+
+_TOKEN_STORE: Dict[str, Dict[str, Any]] = {}
+_TOKEN_LOCK = threading.Lock()
 
 # ---------------- Flask app ----------------
 app = Flask(__name__)
@@ -141,6 +156,92 @@ def _safe_float(x, default=0.0) -> float:
         return float(x)
     except Exception:
         return default
+
+
+def _csv_safe(value: Any) -> Any:
+    if value is None:
+        return ""
+    text = str(value)
+    if text and text[0] in ("=", "+", "-", "@"):
+        return "'" + text
+    return text
+
+
+def _sanitize_log_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    cleaned: Dict[str, Any] = {}
+    for k, v in (row or {}).items():
+        if k in ("draft_body", "notes", "narrative", "summary"):
+            continue
+        cleaned[k] = _csv_safe(v)
+    return cleaned
+
+
+def _client_ip() -> str:
+    xff = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    return xff or (request.remote_addr or "unknown")
+
+
+def _rate_limit_exceeded(route_key: str) -> bool:
+    cfg = RATE_LIMITS.get(route_key)
+    if not cfg:
+        return False
+    max_hits, window_sec = cfg
+    key = f"{route_key}:{_client_ip()}"
+    now = time.time()
+    with _RATE_LOCK:
+        bucket = _RATE_BUCKETS[key]
+        while bucket and bucket[0] <= now - window_sec:
+            bucket.popleft()
+        if len(bucket) >= max_hits:
+            return True
+        bucket.append(now)
+    return False
+
+
+def _mint_download_token(session_id: str) -> str:
+    token = secrets.token_urlsafe(32)
+    with _TOKEN_LOCK:
+        _TOKEN_STORE[token] = {
+            "session_id": session_id,
+            "expires_at": datetime.utcnow() + timedelta(seconds=TOKEN_TTL_SECONDS),
+            "used": False,
+        }
+    return token
+
+
+def _consume_token(token: str) -> Optional[str]:
+    if not token:
+        return None
+    with _TOKEN_LOCK:
+        rec = _TOKEN_STORE.get(token)
+        if not rec:
+            return None
+        if rec.get("used"):
+            return None
+        if rec.get("expires_at") < datetime.utcnow():
+            _TOKEN_STORE.pop(token, None)
+            return None
+        rec["used"] = True
+        return rec.get("session_id")
+
+
+def _peek_token_session(token: str) -> Optional[str]:
+    with _TOKEN_LOCK:
+        rec = _TOKEN_STORE.get(token)
+        if not rec:
+            return None
+        if rec.get("expires_at") < datetime.utcnow() or rec.get("used"):
+            return None
+        return rec.get("session_id")
+
+
+def _stripe_session_paid(session_id: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    try:
+        s = stripe.checkout.Session.retrieve(session_id)
+        paid = str(s.get("payment_status", "")).lower() == "paid"
+        return paid, s, ""
+    except Exception as e:
+        return False, None, str(e)
 
 
 
@@ -313,7 +414,7 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
     if req_match > 0:
         fit_notes.append(f"Requires approximately {req_match}% local match (cash or in-kind).")
 
-    fit = "High" if score >= 6 else "Medium" if score >= 3 else "Low"
+    fit = "Strong Match" if score >= 120 else "Possible Match" if score >= 105 else "Low Match"
     return {"score": score, "fit": fit, "fit_notes": " ".join(fit_notes)}
 
 
@@ -399,7 +500,7 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
 
     rows.sort(key=lambda r: (_safe_float(r.get("score"), 0), _safe_float(r.get("max_amount"), 0)), reverse=True)
 
-    strong_rows = [r for r in rows if r.get("fit") in ("High", "Medium")]
+    strong_rows = [r for r in rows if r.get("fit") in ("Strong Match", "Possible Match")]
     has_strong_matches = len(strong_rows) > 0
     if len(strong_rows) >= 3:
         federal_rows = strong_rows[:3]
@@ -411,11 +512,12 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
 
 def _append_payment_log_row(row: Dict[str, Any]) -> None:
     try:
+        safe_row = _sanitize_log_row(row)
         if os.path.exists(LOG_PATH):
             df = pd.read_csv(LOG_PATH)
-            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+            df = pd.concat([df, pd.DataFrame([safe_row])], ignore_index=True)
         else:
-            df = pd.DataFrame([row])
+            df = pd.DataFrame([safe_row])
         df.to_csv(LOG_PATH, index=False)
     except Exception:
         pass
@@ -428,7 +530,7 @@ def _update_payment_log_by(key: str, value: str, patch: Dict[str, Any]) -> None:
         df = pd.read_csv(LOG_PATH)
         ix = df.index[df[key] == value]
         if len(ix) > 0:
-            for k, v in patch.items():
+            for k, v in _sanitize_log_row(patch).items():
                 df.loc[ix, k] = v
             df.to_csv(LOG_PATH, index=False)
     except Exception:
@@ -491,160 +593,130 @@ def _mk_evaluation_lines(audience: str) -> List[str]:
 
 
 def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
-    """
-    Build a structured narrative draft from intake + grant.
-    Used for both preview (shortened) and full paid draft PDF.
-    """
+    """Build a polished, consultant-style narrative draft with structured sections."""
     intake = dict(intake or {})
     intake.pop("state", None)
     intake.pop("eligible_state", None)
 
     org = _organization_name(intake)
     proj_title = (intake.get("projectTitle") or "Proposed initiative").strip()
-
-    # Clean audience so it doesn't end with a stray period
-    raw_audience = (intake.get("audience") or "").strip()
-    audience = raw_audience.rstrip(".").strip() or "participants"
-
-    # Clean timeline; avoid double periods when user types a full sentence
-    raw_timeline = (intake.get("timeline") or "TBA").strip()
-    timeline = raw_timeline.rstrip().rstrip(".")
-
-    notes = (intake.get("notes") or "").strip()
     category = (intake.get("category") or intake.get("who") or "organization").strip()
+    audience = (intake.get("audience") or "participants").strip().rstrip(".")
+    timeline = (intake.get("timeline") or "12 months").strip().rstrip(".")
+    notes = (intake.get("notes") or "").strip()
 
     amount = _safe_float(intake.get("amountRequested"))
     annual_budget = _safe_float(intake.get("annualBudget"), 0)
     keywords_str = (intake.get("keywords") or "").strip()
     kws = normalized_keywords(keywords_str)
 
-    g_title = grant.get("title") or "Selected opportunity"
+    g_title = grant.get("title") or "Selected federal opportunity"
     g_deadline = grant.get("deadline") or "TBA"
     g_match = int(grant.get("requires_match_percent", 0) or 0)
     g_max = _safe_float(grant.get("max_amount"), 0)
     g_tags = grant.get("tags", []) or []
-    g_geo = (grant.get("geo_scope") or "").strip()
     g_url = grant_display_url(grant) if grant else ""
 
-    if amount > 0:
-        req_str = f"approximately ${amount:,.0f}"
-    else:
-        req_str = "a competitive grant amount aligned with program guidance"
-
-    if annual_budget > 0:
-        budget_str = f"with an estimated annual operating budget of ${annual_budget:,.0f}."
-    else:
-        budget_str = "with a modest operating budget and clear stewardship of funds."
-
-    focus_str = keywords_str or "addressing clearly documented local needs"
-    tag_phrase = ", ".join(g_tags[:4]) if g_tags else "the funder’s stated priorities"
-
-    # Region / scope note
-    region_bits = []
-    if g_geo:
-        region_bits.append(f"This opportunity is described as serving the {g_geo} region.")
-    region_note = " ".join(region_bits)
-
-    # Objectives & evaluation
-    objectives = _mk_objectives_from_keywords(kws, audience)
-    evaluation = _mk_evaluation_lines(audience)
-
-    # 1) Project Summary
-    p1 = (
-        f"{org} proposes “{proj_title}” to support {audience} through activities focused on {focus_str}. "
-        f"The project will request {req_str} under the {g_title} opportunity, "
+    req_str = f"${amount:,.0f}" if amount > 0 else "a competitive request amount"
+    budget_context = (
+        f"The organization currently operates with an estimated annual budget of ${annual_budget:,.0f}."
+        if annual_budget > 0 else
+        "The organization operates with disciplined financial controls and documented stewardship practices."
     )
+    priority_topics = ", ".join(g_tags[:5]) if g_tags else "the published federal priorities"
+    keyword_focus = keywords_str or "the identified community priorities"
 
-    if timeline and timeline.lower() != "tba":
-        # If user wrote a full sentence, keep it; otherwise treat as a phrase.
-        if any(ch in raw_timeline for ch in ".!?"):
-            p1 += f"{timeline} "
-        else:
-            p1 += f"with an implementation timeline of {timeline}. "
-    else:
-        p1 += "The implementation timeline will be finalized with the funder’s guidance. "
-
-    p1 += f"The applicant currently operates as {category} {budget_str}"
-    if region_note:
-        p1 += " " + region_note
-
-    # 2) Need Statement
-    if notes:
-        need_body = notes
-    else:
-        need_body = (
-            f"The target population faces barriers related to limited access to high-quality resources, "
-            f"programming, and supports. Without targeted investment, {audience} are less likely to "
-            f"receive consistent, structured services that improve outcomes over time."
-        )
-    p2 = "There is a clear documented need for this project. " + need_body
-
-    # 3) Objectives
+    objectives = _mk_objectives_from_keywords(kws, audience)
     if not objectives:
         objectives = [
-            "Increase access to high-quality programming connected to the grant’s priorities.",
-            "Improve participant engagement and measurable outcomes over the project period.",
-            "Strengthen the applicant’s capacity to sustain successful activities beyond the grant term.",
+            "Deliver high-quality services through a structured program model tied to measurable milestones.",
+            "Increase participation and retention among the intended audience across the full implementation period.",
+            "Demonstrate outcomes with consistent performance monitoring and evidence-based course corrections.",
         ]
 
-    obj_lines = []
-    for i, line in enumerate(objectives, 1):
-        obj_lines.append(f"{i}. {line}")
-    p3 = "Project Objectives:\n" + "\n".join(obj_lines)
-
-    # 4) Key Activities
-    act_lines = [
-        "Design and deliver structured sessions aligned to clear lesson or activity plans.",
-        "Coordinate staffing, scheduling, and communication with participating stakeholders.",
-        "Integrate family, community, or partner engagement where appropriate.",
-    ]
-    if "after-school" in keywords_str.lower() or "afterschool" in keywords_str.lower():
-        act_lines.append("Offer after-school programming with safe supervision, enrichment, and academic support.")
-    if "stem" in keywords_str.lower() or "robotics" in keywords_str.lower():
-        act_lines.append("Implement hands-on STEM/robotics activities that build problem-solving and teamwork skills.")
-    p4 = "Key Activities & Approach:\n" + "\n".join(f"- {l}" for l in act_lines)
-
-    # 5) Budget Summary
-    budget_lines = [
-        "Grant funds will be used for allowable costs such as materials, supplies, limited equipment, and staffing.",
-        "The applicant will follow all federal, state, and local procurement and fiscal accountability requirements.",
-    ]
-    if g_match > 0:
-        budget_lines.append(
-            f"The applicant will plan to meet the required {g_match}% match through eligible in-kind or cash contributions, as confirmed with the funder’s guidance."
-        )
-    if g_max > 0 and amount > 0:
-        budget_lines.append(
-            f"The requested amount of {req_str} is being scoped with awareness of the program’s published range (up to approximately ${g_max:,.0f}, as applicable)."
-        )
-    p5 = "Budget Summary:\n" + "\n".join(f"- {l}" for l in budget_lines)
-
-    # 6) Evaluation Plan
-    eval_lines = []
-    for i, line in enumerate(evaluation, 1):
-        eval_lines.append(f"{i}. {line}")
-    p6 = "Evaluation Plan:\n" + "\n".join(eval_lines)
-
-    # 7) Alignment with Funder Priorities
-    align_text = (
-        f"This project aligns with {g_title} by advancing activities related to {tag_phrase}. "
-        f"All proposed activities and costs will adhere to program guidance, applicable regulations, "
-        f"and ethical standards. The applicant understands that this draft is a starting point and will "
-        f"review, refine, and customize language prior to any final submission."
-    )
-    deadline_note = f"The current anticipated deadline in this draft is {g_deadline}."
-    url_note = ""
-    if g_url:
-        url_note = f" The funder’s official information or search page for this opportunity can be accessed on Grants.gov at: {g_url}."
-
-    compliance_note = (
-        " Before submitting, the applicant will re-verify eligibility, deadlines, required forms, "
-        "and match expectations using the official funding notice on Grants.gov or the funder’s website."
+    sections = []
+    sections.append(
+        "Executive Summary\n"
+        f"{org} seeks support through the {g_title} opportunity to implement \"{proj_title}\", a focused initiative serving {audience}. "
+        f"The proposed request is {req_str}, aligned to project scope, allowable costs, and federal compliance expectations. "
+        f"The proposed work is designed to advance {keyword_focus} through a practical implementation model that can begin immediately after award and scale responsibly over time. "
+        f"As a {category}, {org} will use this investment to strengthen direct services, improve participant outcomes, and build long-term capacity. "
+        f"The project schedule is planned for {timeline}, with key milestones for launch, service delivery, monitoring, and closeout."
     )
 
-    p7 = align_text + " " + deadline_note + url_note + compliance_note
+    sections.append(
+        "Statement of Need\n"
+        f"The target population currently faces avoidable barriers that limit consistent access to quality programming and support. "
+        f"Local stakeholders have identified persistent needs connected to {keyword_focus}, including uneven resource availability, staffing pressure, and program fragmentation. "
+        f"Without focused intervention, {audience} are likely to experience reduced continuity of services and weaker long-term outcomes. "
+        f"{notes if notes else 'Program records and stakeholder feedback indicate that strategic investment is required to stabilize services, expand access, and improve measurable results across the service area.'} "
+        "This proposal responds to those documented conditions with a targeted plan that is feasible, accountable, and aligned with federal funding priorities."
+    )
 
-    return "\n\n".join([p1, p2, p3, p4, p5, p6, p7])
+    sections.append(
+        "Program Description\n"
+        f"\"{proj_title}\" will be delivered through a structured service model with clear phases for mobilization, implementation, and continuous improvement. "
+        "Initial work will finalize staff responsibilities, procure approved materials, and confirm delivery schedules. "
+        "Program operations will then move into regular service delivery with documented participant touchpoints, quality controls, and periodic leadership reviews. "
+        "The design emphasizes operational discipline, transparent reporting, and timely adaptations when performance data indicates the need for adjustment. "
+        f"Activities remain aligned to {priority_topics} and the core program objectives established by the funding notice."
+    )
+
+    sections.append(
+        "Target Population\n"
+        f"The primary beneficiaries are {audience}, with outreach strategies tailored to improve participation among those who face the highest barriers to access. "
+        "Recruitment and retention plans will use trusted channels, partner referrals, and culturally responsive communication. "
+        "Service design will prioritize equity, continuity, and participant safety while maintaining clear eligibility and attendance standards. "
+        "By centering delivery around the intended audience profile, the project can produce stronger engagement, better completion trends, and more durable outcomes."
+    )
+
+    sections.append(
+        "Implementation Plan\n"
+        f"Implementation will proceed over {timeline} with a milestone-based management structure. "
+        "Month 1 focuses on onboarding, procurement, and baseline setup. "
+        "Months 2 through 9 prioritize direct service delivery, quality assurance, and partner coordination. "
+        "Final months concentrate on performance analysis, sustainability transition steps, and closeout reporting. "
+        "Program leadership will hold routine check-ins to address risks early, monitor spending against approved categories, and maintain alignment with grant requirements. "
+        "Key objectives include: " + " ".join([f"({i+1}) {obj}" for i, obj in enumerate(objectives[:3])])
+    )
+
+    sections.append(
+        "Expected Outcomes\n"
+        "The project is expected to improve access, participation consistency, and measurable progress for enrolled participants. "
+        "Outcome tracking will include service volume, completion indicators, and performance data tied to program goals. "
+        "Leadership will review monthly dashboards to identify trends and implement corrective actions when needed. "
+        "By the end of the grant period, the organization expects stronger participant outcomes, improved operational reliability, and a validated implementation model suitable for continuation."
+    )
+
+    sections.append(
+        "Organizational Capacity\n"
+        f"{org} has the administrative and programmatic foundation required to manage federal grant activities responsibly. "
+        f"{budget_context} "
+        "The organization maintains defined oversight responsibilities for program leadership, financial controls, procurement, and reporting compliance. "
+        "Staff and partner roles will be documented at project launch, and leadership will maintain an auditable record of implementation decisions, expenditures, and performance milestones."
+    )
+
+    funding_range = f" (up to approximately ${g_max:,.0f})" if g_max > 0 else ""
+    match_clause = f"The plan includes a strategy to satisfy the required {g_match}% match through eligible cash or in-kind contributions. " if g_match > 0 else ""
+    sections.append(
+        "Budget Use\n"
+        f"Requested funds ({req_str}) will support allowable direct costs such as personnel time, program materials, essential supplies, delivery supports, and evaluation activities. "
+        "Every expense category will be tied to implementation milestones and documented outputs. "
+        f"The request is scoped with awareness of the published funding range{funding_range}. "
+        f"{match_clause}"
+        "Financial reporting will follow federal standards and the final award conditions."
+    )
+
+    sections.append(
+        "Sustainability\n"
+        "Sustainability planning begins during implementation rather than at closeout. "
+        "The organization will document effective components, embed efficient practices into routine operations, and maintain partner engagement to preserve service continuity. "
+        "Performance findings will inform future funding strategies and support replication of successful elements. "
+        f"Prior to submission, leadership will re-verify eligibility, deadlines, and compliance details for {g_title} (deadline: {g_deadline})."
+        + (f" Official opportunity details: {g_url}." if g_url else "")
+    )
+
+    return "\n\n".join(sections)
 
 
 def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
@@ -754,6 +826,16 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
     return pdf_path
 
 
+@app.before_request
+def _apply_rate_limit():
+    if request.method == "OPTIONS":
+        return None
+    route = request.path
+    if route in RATE_LIMITS and _rate_limit_exceeded(route):
+        return jsonify(ok=False, error="Rate limit exceeded. Please try again shortly."), 429
+    return None
+
+
 # ---------------- health ----------------
 @app.get("/")
 def home():
@@ -784,28 +866,15 @@ def get_offline():
 
 @app.get("/get/debug-paths")
 def get_debug_paths():
-    """
-    Diagnostics to verify file locations on Render and confirm PDF existence.
-    """
+    debug_enabled = os.getenv("DEBUG", "false").lower() == "true"
+    trusted_ip = os.getenv("TRUSTED_DEBUG_IP", "127.0.0.1")
+    if not debug_enabled or _client_ip() != trusted_ip:
+        return jsonify(ok=False, error="Not found"), 404
+
     try:
         pdf_files = sorted(glob.glob(os.path.join(PDF_DIR, "*.pdf")), key=os.path.getmtime, reverse=True)
         pdf_tail = [os.path.basename(p) for p in pdf_files[:10]]
-
-        log_exists = os.path.exists(LOG_PATH)
-        log_size = os.path.getsize(LOG_PATH) if log_exists else 0
-
-        return jsonify(
-            ok=True,
-            outputDir=OUTPUT_DIR,
-            pdfDir=PDF_DIR,
-            pdfDirExists=os.path.isdir(PDF_DIR),
-            pdfTail=pdf_tail,
-            logPath=LOG_PATH,
-            logExists=log_exists,
-            logSize=log_size,
-            grantsPath=GRANTS_PATH,
-            ts=_now_utc(),
-        )
+        return jsonify(ok=True, pdfTail=pdf_tail, ts=_now_utc())
     except Exception as e:
         return jsonify(ok=False, error=str(e), ts=_now_utc()), 500
 
@@ -1007,28 +1076,43 @@ def stripe_webhook():
 
 
 # ---------------- Receipt / Download ----------------
-@app.get("/receipt")
-def receipt():
-    session_id = request.args.get("session_id") or request.args.get("sid")
+@app.post("/create-download-token")
+def create_download_token():
+    session_id = request.args.get("session_id") or (request.get_json(silent=True) or {}).get("session_id")
     if not session_id:
         return jsonify(ok=False, error="missing session_id"), 400
 
+    paid, _s, err = _stripe_session_paid(session_id)
+    if err:
+        return jsonify(ok=False, error=f"Stripe lookup failed: {err}"), 400
+    if not paid:
+        return jsonify(ok=False, error="payment not completed"), 402
+
+    token = _mint_download_token(session_id)
+    _update_payment_log_by("session_id", session_id, {"paid": True})
+    return jsonify(ok=True, token=token, expires_in=TOKEN_TTL_SECONDS)
+
+
+@app.get("/receipt")
+def receipt():
+    token = request.args.get("token")
+    if not token:
+        return jsonify(ok=False, error="missing token"), 400
+
+    session_id = _peek_token_session(token)
+    if not session_id:
+        return jsonify(ok=False, error="invalid or expired token"), 400
+
+    paid, s, err = _stripe_session_paid(session_id)
+    if err:
+        return jsonify(ok=False, error=f"Stripe lookup failed: {err}"), 400
+    if not paid:
+        return jsonify(ok=False, error="payment not completed"), 402
+
     row = find_log_by_session(session_id)
     if not row:
-        try:
-            s = stripe.checkout.Session.retrieve(session_id)
-            md = s.metadata or {}
-        except Exception as e:
-            return jsonify(ok=False, error=f"Stripe lookup failed: {e}"), 400
-
+        md = s.metadata or {}
         order_id = md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
-        pdf_path = os.path.join(PDF_DIR, f"{order_id}.pdf")
-        if not os.path.exists(pdf_path):
-            try:
-                pdf_path = make_pdf(order_id, dict(md))
-            except Exception:
-                pdf_path = ""
-
         _append_payment_log_row({
             "ts_utc": _now_utc(),
             "order_id": order_id,
@@ -1040,68 +1124,61 @@ def receipt():
             "grant_program": md.get("grant_program", ""),
             "session_id": session_id,
             "session_url": "",
-            "price": float(md.get("price", 0) or 0),
-            "pdf_path": pdf_path,
-            "paid": s.get("payment_status") == "paid",
+            "price": float(md.get("price", FLAT_PRICE) or FLAT_PRICE),
+            "pdf_path": "",
+            "paid": True,
         })
         row = find_log_by_session(session_id)
 
-    dl_url = f"/download-by-session?session_id={session_id}"
     return jsonify({
         "ok": True,
-        "session_id": session_id,
         "order_id": row.get("order_id", ""),
-        "email": "",
-        "amount_total": row.get("price", 0),
-        "paid": bool(row.get("paid", False)),
+        "amount_total": row.get("price", FLAT_PRICE),
+        "paid": True,
         "grant_title": row.get("grant_title", ""),
-        "download_path": dl_url,
+        "download_path": f"/download-by-session?token={token}",
         "ts": _now_utc(),
     })
 
 
-# ---------------- Hardened download-by-session (never 500) ----------------
 @app.get("/download-by-session")
 def download_by_session():
     try:
-        session_id = request.args.get("session_id")
+        token = request.args.get("token")
+        if not token:
+            return jsonify(ok=False, error="missing token"), 400
+
+        session_id = _consume_token(token)
         if not session_id:
-            return jsonify(ok=False, error="missing session_id"), 400
+            return jsonify(ok=False, error="invalid, expired, or already-used token"), 400
 
-        def _safe_send(path, order_id_fallback="draft"):
-            try:
-                if not (path and os.path.exists(path)):
-                    return jsonify(ok=False, error="PDF not found yet; try again in a moment."), 404
-                name = os.path.basename(path) or f"{order_id_fallback}.pdf"
-                return send_file(path, as_attachment=True, download_name=name, mimetype="application/pdf")
-            except Exception as e:
-                return jsonify(ok=False, error=f"send_file failed: {e}"), 400
+        paid, s, err = _stripe_session_paid(session_id)
+        if err:
+            return jsonify(ok=False, error=f"Stripe lookup failed: {err}"), 400
+        if not paid:
+            return jsonify(ok=False, error="payment not completed"), 402
 
-        # 1) try log
         row = find_log_by_session(session_id)
-        if row and row.get("pdf_path") and os.path.exists(row["pdf_path"]):
-            return _safe_send(row["pdf_path"], row.get("order_id", "draft"))
-
-        # 2) rebuild from Stripe metadata
-        try:
-            s = stripe.checkout.Session.retrieve(session_id)
-            md = s.metadata or {}
-        except Exception as e:
-            return jsonify(ok=False, error=f"Stripe lookup failed: {e}"), 400
-
+        md = (s.metadata or {}) if s else {}
         order_id = (row.get("order_id") if row else None) or md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
-        try:
-            pdf_path = make_pdf(order_id, dict(md))
-        except Exception as e:
-            return jsonify(ok=False, error=f"PDF generation failed: {e}"), 400
 
-        _update_payment_log_by("session_id", session_id, {
-            "order_id": order_id,
-            "pdf_path": pdf_path,
-            "paid": s.get("payment_status") == "paid"
-        })
-        return _safe_send(pdf_path, order_id)
+        pdf_path = row.get("pdf_path") if row else ""
+        if not (pdf_path and os.path.exists(pdf_path)):
+            pdf_payload = dict(md)
+            if not pdf_payload.get("draft_body") and row and row.get("draft_body"):
+                pdf_payload["draft_body"] = row.get("draft_body")
+            pdf_path = make_pdf(order_id, pdf_payload)
+            _update_payment_log_by("session_id", session_id, {
+                "order_id": order_id,
+                "pdf_path": pdf_path,
+                "paid": True,
+            })
 
+        if not (pdf_path and os.path.exists(pdf_path)):
+            return jsonify(ok=False, error="PDF not found yet; try again in a moment."), 404
+
+        name = os.path.basename(pdf_path) or f"{order_id}.pdf"
+        return send_file(pdf_path, as_attachment=True, download_name=name, mimetype="application/pdf")
     except Exception as e:
         return jsonify(ok=False, error=f"download route error: {e}"), 400
 

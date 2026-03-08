@@ -79,27 +79,23 @@ export async function createCheckoutSession(payload) {
   });
 }
 
-export async function receiptBySession(sessionId) {
-  const u = `${ENDPOINTS.receipt}?session_id=${encodeURIComponent(sessionId)}`;
+export async function createDownloadToken(sessionId) {
+  return safeFetch(ENDPOINTS.createDownloadToken, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+}
+
+export async function receiptByToken(token) {
+  const u = `${ENDPOINTS.receipt}?token=${encodeURIComponent(token)}`;
   return safeFetch(u, { method: "GET" });
 }
 
-export function downloadUrlBySession(sessionId) {
-  return `${ENDPOINTS.downloadBySession}?session_id=${encodeURIComponent(
-    sessionId
-  )}`;
+export function downloadUrlByToken(token) {
+  return `${ENDPOINTS.downloadBySession}?token=${encodeURIComponent(token)}`;
 }
 
-/* ---------- Backend diagnostics (optional) ---------- */
-
-export async function debugPaths() {
-  try {
-    const res = await fetch(ENDPOINTS.debugPaths, { method: "GET" });
-    return await res.json();
-  } catch (e) {
-    return { ok: false, error: String(e) };
-  }
-}
 
 /* ---------- Health check helper (optional UI) ---------- */
 
