@@ -12,19 +12,12 @@ import "./App.css";
 
 /* -------- Safe Grants.gov direct opportunity URL helper -------- */
 function safeProgramUrl(u, title, tags = [], row = {}) {
-  if (row.official_url) return row.official_url;
-  try {
-    if (typeof u === "string" && u.startsWith("http") && u.includes("grants.gov") && !u.includes("search-grants")) return u;
-  } catch {}
-
-  const oppId = row.opportunity_id || row.oppId || row.opp_id || row.program_id || "";
-  const oppNumber = row.opportunity_number || row.oppNumber || row.opp_number || "";
-  if (oppId || oppNumber) {
-    const base = `https://www.grants.gov/grantsws/rest/opportunities/details?oppId=${encodeURIComponent(oppId || oppNumber)}`;
-    return oppNumber ? `${base}&oppNumber=${encodeURIComponent(oppNumber)}` : base;
+  const official = row.official_url || row.program_url || u || "";
+  if (typeof official === "string" && official.startsWith("http") && official.includes("grants.gov") && !official.includes("apply07.grants.gov") && !official.includes("grantsws/rest/opportunities/details")) {
+    return official;
   }
-
-  return "";
+  const q = encodeURIComponent([title, ...(tags || [])].filter(Boolean).join(" ") || "federal grants");
+  return `https://www.grants.gov/search-grants?keywords=${q}`;
 }
 
 /* -------- Success Screen -------- */
@@ -93,7 +86,7 @@ function ThanksScreen() {
       <footer className="footer">
         <p>© 2025 GrantForgeUSA</p>
         <p className="muted">
-          This product uses proprietary software to generate draft language. Review and edit before submitting to any funder.
+          Review and edit all draft materials before submission.
         </p>
       </footer>
     </div>
