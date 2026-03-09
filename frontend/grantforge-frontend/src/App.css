@@ -1,150 +1,52 @@
-/* src/App.css — vertical, mobile-first layout */
-
 :root {
-  --bg: #eef5fb;
-  --card: #ffffff;
-  --text: #0f172a;
-  --muted: #5b7083;
-  --primary: #1e90ff;
-  --primary-600: #1876cc;
-  --border: #d0d7de;
-  --shadow: 0 8px 24px rgba(0,0,0,0.08);
+  --bg: #f4f7fb;
+  --surface: #ffffff;
+  --text: #10243e;
+  --muted: #5a6d85;
+  --primary: #0f62fe;
+  --primary-dark: #0b4bcc;
+  --border: #d9e1ec;
   --radius: 14px;
+  --shadow: 0 10px 24px rgba(16, 36, 62, 0.08);
 }
 
 * { box-sizing: border-box; }
+body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); }
 
-html, body, #root {
-  height: 100%;
-}
+.wrap { max-width: 980px; margin: 32px auto; padding: 0 16px; }
+.brand { margin-bottom: 18px; }
+.brand h1 { margin: 0; font-size: 2rem; }
 
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-  color: var(--text);
-  background: var(--bg);
-}
-
-.container {
-  max-width: 720px;
-  margin: 28px auto;
-  padding: 0 16px;
-}
-
-.card.vertical {
-  width: 100%;
-  background: var(--card);
+.card, .results {
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 24px;
+  padding: 20px;
+  margin-bottom: 16px;
 }
 
-h1 {
-  margin: 0 0 6px 0;
-  font-size: 32px;
-  line-height: 1.2;
+label { display: block; margin: 12px 0; font-weight: 600; }
+input, select, textarea {
+  width: 100%; margin-top: 6px; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--border); font: inherit;
 }
 
-h3 {
-  margin: 18px 0 8px 0;
-  font-size: 20px;
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+button {
+  border: 0; border-radius: 10px; padding: 11px 14px; background: var(--primary); color: #fff; font-weight: 700; cursor: pointer;
 }
+button:hover { background: var(--primary-dark); }
+button:disabled { opacity: 0.7; cursor: not-allowed; }
 
-.muted {
-  color: var(--muted);
-  margin: 0 0 12px 0;
-}
+.actions { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.muted { color: var(--muted); }
+.error { color: #b42318; font-weight: 600; }
+.footer { padding: 8px 4px 24px; }
+.result { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.preview pre { white-space: pre-wrap; background: #f8fbff; border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+a { color: #0b57d0; }
 
-.dim { color: var(--muted); font-weight: 500; }
-
-label {
-  display: block;
-  width: 100%;
-  margin: 12px 0;
-  font-weight: 600;
-}
-
-label > input,
-label > select,
-label > textarea {
-  display: block;
-  width: 100%;
-  margin-top: 6px;
-  padding: 12px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fff;
-  font: inherit;
-  color: var(--text);
-}
-
-textarea { min-height: 104px; resize: vertical; }
-
-.submit-btn, .back-btn {
-  width: 100%;
-  margin-top: 10px;
-  border: 0;
-  border-radius: 10px;
-  padding: 12px 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.submit-btn {
-  background: var(--primary);
-  color: #fff;
-}
-.submit-btn:hover { background: var(--primary-600); }
-
-.back-btn {
-  background: #f1f5f9;
-  color: var(--text);
-}
-
-.warn {
-  background: #fff7ed;
-  color: #9a3412;
-  border: 1px solid #fed7aa;
-  padding: 10px 12px;
-  border-radius: 10px;
-}
-
-.list {
-  list-style: none;
-  padding: 0;
-  margin: 6px 0 0 0;
-}
-.list li {
-  margin: 8px 0;
-  padding: 10px 12px;
-  background: #f8fafc;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-.title {
-  color: #0a68d6;
-  font-weight: 700;
-  text-decoration: none;
-}
-.title:hover { text-decoration: underline; }
-
-.meta { color: var(--muted); margin-top: 4px; }
-
-.results-group {
-  margin-top: 16px;
-}
-
-.results-group h4 {
-  margin: 12px 0 8px;
-}
-
-.results-group ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-/* Larger screens: keep vertical form but tighten spacing; buttons can sit side-by-side if desired */
-@media (min-width: 640px) {
-  .submit-btn, .back-btn { width: 100%; }
+@media (max-width: 700px) {
+  .grid2 { grid-template-columns: 1fr; }
+  .actions button { width: 100%; }
 }

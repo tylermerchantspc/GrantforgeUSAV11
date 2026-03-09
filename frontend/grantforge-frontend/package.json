@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:integration": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "jspdf": "^3.0.3",

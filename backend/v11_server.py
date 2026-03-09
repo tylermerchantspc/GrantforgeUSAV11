@@ -3,7 +3,7 @@
 #          REAL narrative draft generation, reliable PDF download
 #          (eager + webhook), contextual previews, and debug utilities.
 
-import os, json, glob, re, secrets, threading, time
+import os, json, re, secrets, threading, time
 from datetime import datetime, date, timedelta
 from collections import defaultdict, deque
 from typing import Dict, Any, List, Optional, Tuple
@@ -52,12 +52,16 @@ RATE_LIMITS = {
     "/questionnaire": (20, 60),
     "/preview": (10, 60),
     "/create-checkout-session": (8, 60),
+    "/create-download-token": (20, 60),
+    "/download-by-session": (20, 60),
 }
 _RATE_BUCKETS: Dict[str, deque] = defaultdict(deque)
 _RATE_LOCK = threading.Lock()
 
 _TOKEN_STORE: Dict[str, Dict[str, Any]] = {}
 _TOKEN_LOCK = threading.Lock()
+DEBUG_ENDPOINTS_ENABLED = os.getenv("ENABLE_DEBUG_ENDPOINTS", "false").lower() == "true"
+LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "30"))
 
 # ---------------- Flask app ----------------
 app = Flask(__name__)
@@ -71,6 +75,16 @@ if CORS_ORIGINS == "*":
 else:
     CORS(app, origins=[o.strip() for o in CORS_ORIGINS.split(",") if o.strip()])
 
+
+@app.after_request
+def _set_security_headers(resp):
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    resp.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    if request.headers.get("X-Forwarded-Proto", "http") == "https":
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return resp
 
 # ---------------- helpers ----------------
 def cents(x: float) -> int:
@@ -91,6 +105,10 @@ def _read_json(path: str) -> Any:
 
 def _norm_words(s: str) -> List[str]:
     return [w.strip().lower() for w in re.split(r"[,;\n]", (s or "")) if w.strip()]
+
+
+def _tokenize_text(s: str) -> List[str]:
+    return [tok for tok in re.split(r"[^a-zA-Z0-9]+", (s or "").lower()) if len(tok) > 2]
 
 
 INTAKE_TYPE_MAP = {
@@ -156,6 +174,55 @@ def _safe_float(x, default=0.0) -> float:
         return float(x)
     except Exception:
         return default
+
+
+def _sanitize_text(value: Any, max_len: int = 500) -> str:
+    raw = str(value or "")
+    cleaned = re.sub(r"<[^>]*>", "", raw)
+    cleaned = cleaned.replace("\x00", "")
+    cleaned = re.sub(r"[\r\n\t]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:max_len]
+
+
+def _sanitize_numeric(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(str(value).replace(",", "").strip())
+    except Exception:
+        return default
+
+
+def sanitize_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    allowed_text = {
+        "organization", "organization_name", "org", "category", "who", "keywords",
+        "projectTitle", "timeline", "audience", "notes", "need", "session_id"
+    }
+    out: Dict[str, Any] = {}
+    for k, v in (data or {}).items():
+        if k in ("state", "eligible_state", "phone", "phoneNumber"):
+            continue
+        if k in ("amountRequested", "annualBudget"):
+            out[k] = _sanitize_numeric(v, 0.0)
+        elif k in ("includeExpired",):
+            out[k] = bool(v)
+        elif k == "grant" and isinstance(v, dict):
+            out[k] = {
+                "title": _sanitize_text(v.get("title", ""), 200),
+                "program": _sanitize_text(v.get("program", ""), 200),
+                "deadline": _sanitize_text(v.get("deadline", ""), 100),
+                "program_url": _sanitize_text(v.get("program_url", ""), 500),
+                "official_url": _sanitize_text(v.get("official_url", ""), 500),
+                "opportunity_number": _sanitize_text(v.get("opportunity_number", ""), 120),
+                "opp_number": _sanitize_text(v.get("opp_number", ""), 120),
+                "max_amount": _sanitize_numeric(v.get("max_amount", 0), 0.0),
+                "tags": [_sanitize_text(t, 80) for t in (v.get("tags") or [])][:20],
+                "requires_match_percent": int(_sanitize_numeric(v.get("requires_match_percent", 0), 0)),
+            }
+        elif k in allowed_text:
+            out[k] = _sanitize_text(v, 500)
+        else:
+            out[k] = v
+    return out
 
 
 def _csv_safe(value: Any) -> Any:
@@ -411,15 +478,15 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
 
     # 3) keyword overlap
     tags = normalized_tags(gr.get("tags", []))
-    summary_tokens = normalized_tags(_norm_words(gr.get("summary", "")))
+    summary_tokens = normalized_tags(_tokenize_text(gr.get("summary", "")))
     keyword_terms = set()
     for token in kws:
         keyword_terms.update([w for w in token.split() if len(w) > 2])
     grant_terms = set()
     for token in (tags + summary_tokens):
         grant_terms.update([w for w in token.split() if len(w) > 2])
-    title_terms = normalized_tags(_norm_words(gr.get("title", "")))
-    program_terms = normalized_tags(_norm_words(gr.get("program", "")))
+    title_terms = normalized_tags(_tokenize_text(gr.get("title", "")))
+    program_terms = normalized_tags(_tokenize_text(gr.get("program", "")))
     overlap = (set(kws) & (set(tags) | set(summary_tokens) | set(title_terms) | set(program_terms))) | (keyword_terms & grant_terms)
     if overlap:
         score += min(len(overlap), 5) * 8
@@ -542,6 +609,8 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
         for gr in grants:
             # hide expired unless explicitly requested
             close_date = gr.get("close_date") or gr.get("deadline") or ""
+            if _safe_float(gr.get("max_amount"), 0) > 2_000_000:
+                continue
             is_expired = _is_expired(close_date)
             if not include_expired and is_expired:
                 continue
@@ -582,6 +651,8 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     if not rows:
         for gr in grants:
             close_date = gr.get("close_date") or gr.get("deadline") or ""
+            if _safe_float(gr.get("max_amount"), 0) > 2_000_000:
+                continue
             if not include_expired and _is_expired(close_date):
                 continue
             s = score_grant(gr, category, kws, amount)
@@ -619,8 +690,23 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     return federal_rows, has_strong_matches
 
 
+def _rotate_payment_log_if_needed() -> None:
+    if not os.path.exists(LOG_PATH):
+        return
+    cutoff = datetime.utcnow() - timedelta(days=LOG_RETENTION_DAYS)
+    try:
+        df = pd.read_csv(LOG_PATH)
+        if "ts_utc" in df.columns:
+            parsed = pd.to_datetime(df["ts_utc"], errors="coerce", utc=True)
+            df = df.loc[(parsed.isna()) | (parsed >= cutoff)]
+            df.to_csv(LOG_PATH, index=False)
+    except Exception:
+        return
+
+
 def _append_payment_log_row(row: Dict[str, Any]) -> None:
     try:
+        _rotate_payment_log_if_needed()
         safe_row = _sanitize_log_row(row)
         if os.path.exists(LOG_PATH):
             df = pd.read_csv(LOG_PATH)
@@ -756,14 +842,14 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
 
     sections = [
         (
-            "Executive Summary\n"
+            "Summary\n"
             f"{org} submits this proposal narrative for the {g_title} opportunity to implement '{proj_title}' for {audience}. "
             f"As a {category}, the organization seeks {req_str} to execute a realistic, outcomes-driven initiative in the {client_sector} sector over {timeline}. "
             "The plan combines direct service delivery, strong project governance, and measurable performance management so reviewers can quickly assess feasibility, readiness, and public value. "
             "This request is designed to generate near-term improvements while establishing durable systems and partner coordination that outlast the award period."
         ),
         (
-            "Statement of Need\n"
+            "Need Statement\n"
             f"The case for investment is clear: {need_context} "
             f"For {audience}, current conditions reflect inconsistent access, delayed intervention, and fragmented service pathways that suppress outcomes and increase long-term community costs. "
             f"Stakeholder feedback and local trend data indicate sustained pressure in areas tied to {keywords_str or 'core community needs'}, yet current resources are insufficient to close gaps at the required scale and speed. "
@@ -859,9 +945,11 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
 
     def draw_hyperlink(label: str, url: str) -> int:
         display = f"{label}: View official Grants.gov opportunity"
+        c.setFillColorRGB(0.0, 0.2, 0.8)
         c.drawString(left_margin, y, display)
         text_width = c.stringWidth(display, "Helvetica", 10)
         c.linkURL(url, (left_margin, y - 2, left_margin + text_width, y + 10), relative=0)
+        c.setFillColorRGB(0, 0, 0)
         return y - 14
 
     draft_body = payload.get("draft_body")
@@ -883,7 +971,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
         if y < bottom_margin + 20:
             y = new_page()
 
-        y = draw_section_header("Order Details")
+        y = draw_section_header("Grant opportunity details")
 
         summary_lines = [
             f"Project title: {payload.get('projectTitle', '')}",
@@ -961,21 +1049,16 @@ def get_offline():
 
 @app.get("/get/debug-paths")
 def get_debug_paths():
-    return jsonify(ok=False, error="Not found"), 404
-
-    try:
-        pdf_files = sorted(glob.glob(os.path.join(PDF_DIR, "*.pdf")), key=os.path.getmtime, reverse=True)
-        pdf_tail = [os.path.basename(p) for p in pdf_files[:10]]
-        return jsonify(ok=True, pdfTail=pdf_tail, ts=_now_utc())
-    except Exception as e:
-        return jsonify(ok=False, error=str(e), ts=_now_utc()), 500
+    if not DEBUG_ENDPOINTS_ENABLED:
+        return jsonify(ok=False, error="Not found"), 404
+    return jsonify(ok=True, ts=_now_utc(), message="Debug endpoints enabled")
 
 
 # ---------------- shortlist/search ----------------
 @app.post("/questionnaire")
 def questionnaire():
     try:
-        data = request.get_json(force=True) or {}
+        data = sanitize_payload(request.get_json(force=True) or {})
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
 
@@ -996,7 +1079,7 @@ def search():
 @app.post("/preview")
 def preview():
     try:
-        data = request.get_json(force=True) or {}
+        data = sanitize_payload(request.get_json(force=True) or {})
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
 
@@ -1021,13 +1104,11 @@ def create_checkout_session():
         return jsonify(ok=False, error="Stripe keys are not configured"), 400
 
     try:
-        data = request.get_json(force=True) or {}
+        data = sanitize_payload(request.get_json(force=True) or {})
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
 
     data = dict(data or {})
-    data.pop("state", None)
-    data.pop("eligible_state", None)
 
     org = _organization_name(data, default="Customer")
     category = (data.get("category") or data.get("who") or "Other").strip()
@@ -1169,7 +1250,8 @@ def stripe_webhook():
 # ---------------- Receipt / Download ----------------
 @app.post("/create-download-token")
 def create_download_token():
-    session_id = request.args.get("session_id") or (request.get_json(silent=True) or {}).get("session_id")
+    raw_body = sanitize_payload(request.get_json(silent=True) or {})
+    session_id = _sanitize_text(request.args.get("session_id") or raw_body.get("session_id"), 200)
     if not session_id:
         return jsonify(ok=False, error="missing session_id"), 400
 
@@ -1250,8 +1332,6 @@ def download_by_session():
             return jsonify(ok=False, error="payment not completed"), 402
 
         row = find_log_by_session(session_id)
-        if row and not bool(row.get("paid")):
-            return jsonify(ok=False, error="payment not completed"), 402
         md = (s.metadata or {}) if s else {}
         order_id = (row.get("order_id") if row else None) or md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
 
