@@ -57,7 +57,7 @@ function ThanksScreen() {
       if (mounted && tries < 15) {
         setTimeout(poll, 2000);
       } else if (mounted && !url) {
-        setErr("Payment is still finalizing. Please refresh in a moment.");
+        setErr("Your payment is still finalizing. Please refresh in a moment.");
       }
     };
 
@@ -74,10 +74,10 @@ function ThanksScreen() {
       </header>
 
       <section className="card">
-        <h2>Payment Success</h2>
+        <h2>Your grant narrative is ready</h2>
         {url ? (
           <p>
-            <a id="downloadLink" href={url}>Download Draft PDF</a>
+            <a id="downloadLink" href={url}>Download Grant Narrative PDF</a>
             {!paid && <span className="muted" style={{ marginLeft: 8 }}>(payment finalizing)</span>}
           </p>
         ) : (
@@ -134,6 +134,10 @@ function IntakeApp() {
 
   async function handleSeeRecommendations() {
     setError("");
+    if (!org.trim() || !keywords.trim()) {
+      setError("Organization and keywords are required.");
+      return;
+    }
     setLoading(true);
     setResults([]);
     setPreviews({});
@@ -198,7 +202,7 @@ function IntakeApp() {
           <input
             value={org}
             onChange={e=>setOrg(e.target.value)}
-            
+            required
           />
         </label>
 
@@ -219,7 +223,7 @@ function IntakeApp() {
           <input
             value={keywords}
             onChange={e=>setKeywords(e.target.value)}
-            
+            required
           />
         </label>
 
@@ -335,10 +339,10 @@ function IntakeApp() {
                         disabled={!!previewBusy[row.title] || loading}
                         aria-busy={!!previewBusy[row.title]}
                       >
-                        {previewBusy[row.title] ? "Building preview…" : "See Preview Language"}
+                        {previewBusy[row.title] ? "Building preview…" : "Preview Narrative"}
                       </button>
                       <button onClick={()=>handlePay(row)} disabled={loading}>
-                        Generate Full Draft — $2,500
+                        Pay Now — $2,500
                       </button>
                     </div>
 

@@ -6,3 +6,4 @@ reportlab==3.6.12
 pandas==2.2.2
 gunicorn==21.2.0
 requests==2.32.3
+pytest==8.3.3
