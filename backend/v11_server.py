@@ -162,7 +162,8 @@ def _csv_safe(value: Any) -> Any:
     if value is None:
         return ""
     text = str(value)
-    if text and text[0] in ("=", "+", "-", "@"):
+    text = text.replace("\r", " ").replace("\n", " ").strip()
+    if text and text[0] in ("=", "+", "-", "@", "\t"):
         return "'" + text
     return text
 
@@ -266,25 +267,34 @@ def _is_expired(deadline_str: str) -> bool:
         return False
 
 
-def fallback_grants_gov_url(title: str, tags: List[str]) -> str:
-    """Fallback to Grants.gov listings page when no direct opportunity ID is available."""
-    q = " ".join([title] + list(tags or [])).strip() or "federal grants"
+def fallback_grants_gov_url(title: str, tags: List[str], opp_number: str = "") -> str:
+    """Fallback to Grants.gov listings page when no direct opportunity URL is available."""
+    q_parts = [opp_number, title] + list(tags or [])
+    q = " ".join([p for p in q_parts if p]).strip() or "federal grants"
     return f"https://www.grants.gov/search-grants?keywords={q.replace(' ', '%20')}"
 
 
-def _safe_grants_url(url: str, title: str, tags: List[str]) -> str:
+def grants_gov_notice_url(opp_number: str) -> str:
+    clean_opp = (opp_number or "").strip()
+    if not clean_opp:
+        return ""
+    encoded = re.sub(r"\s+", "%20", clean_opp)
+    return f"https://www.grants.gov/search-results-detail/{encoded}"
+
+
+def _safe_grants_url(url: str, title: str, tags: List[str], opp_number: str = "") -> str:
     """Only allow modern Grants.gov links; otherwise use search fallback."""
     if isinstance(url, str) and url.startswith(("http://", "https://")) and "grants.gov" in url:
         lowered = url.lower()
         if "apply07.grants.gov" in lowered or "grantsws/rest/opportunities/details" in lowered:
-            return fallback_grants_gov_url(title, tags)
+            return fallback_grants_gov_url(title, tags, opp_number)
         return url
-    return fallback_grants_gov_url(title, tags)
+    return fallback_grants_gov_url(title, tags, opp_number)
 
 
 # -------- URL normalizer (force Grants.gov or fallback to its search) --------
-def _ensure_http_url(url: str, title: str, tags: List[str]) -> str:
-    return _safe_grants_url(url, title or "", tags or [])
+def _ensure_http_url(url: str, title: str, tags: List[str], opp_number: str = "") -> str:
+    return _safe_grants_url(url, title or "", tags or [], opp_number)
 
 
 def grant_display_url(gr: Dict[str, Any]) -> str:
@@ -309,19 +319,23 @@ def grant_display_url(gr: Dict[str, Any]) -> str:
         or ""
     ).strip()
 
+    notice_url = grants_gov_notice_url(opp_number)
+    if notice_url:
+        return notice_url
+
     official_url = (gr.get("official_url") or "").strip()
     if official_url:
-        return _ensure_http_url(official_url, gr.get("title", ""), gr.get("tags", []) or [])
+        return _ensure_http_url(official_url, gr.get("title", ""), gr.get("tags", []) or [], opp_number)
 
     raw = gr.get("funding_url") or gr.get("program_url") or ""
     if raw:
-        return _safe_grants_url(raw, gr.get("title", ""), gr.get("tags", []) or [])
+        return _safe_grants_url(raw, gr.get("title", ""), gr.get("tags", []) or [], opp_number)
 
     if opp_id or opp_number:
         q = " ".join([gr.get("title", ""), opp_id, opp_number]).strip()
-        return fallback_grants_gov_url(q, gr.get("tags", []) or [])
+        return fallback_grants_gov_url(q, gr.get("tags", []) or [], opp_number)
 
-    return fallback_grants_gov_url(gr.get("title", ""), gr.get("tags", []) or [])
+    return fallback_grants_gov_url(gr.get("title", ""), gr.get("tags", []) or [], opp_number)
 
 
 def _pdf_header_mode_note() -> str:
@@ -717,14 +731,13 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     aligned_request = min(amount, g_max) if (amount > 0 and g_max > 0) else amount
     aligned_req_str = f"${aligned_request:,.0f}" if aligned_request > 0 else req_str
 
-    budget_context = (
-        f"The organization currently operates with an estimated annual budget of ${annual_budget:,.0f}, which provides sufficient financial infrastructure to manage reimbursable and performance-based grant activities."
-        if annual_budget > 0 else
-        "The organization maintains financial controls, procurement standards, and board-level oversight to support federal grants management and audit readiness."
-    )
-
     need_context = stated_need or notes or (
         "The project addresses access barriers, service coordination gaps, and uneven resource distribution that limit outcomes for the intended population."
+    )
+    budget_context = (
+        f"The organization currently operates with an estimated annual budget of ${annual_budget:,.0f}, supporting compliant grants management, monitoring, and audit-ready documentation."
+        if annual_budget > 0 else
+        "The organization maintains financial controls, procurement standards, and leadership oversight consistent with federal grant administration requirements."
     )
 
     objectives = _mk_objectives_from_keywords(kws, audience)
@@ -735,86 +748,50 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
             "Demonstrate measurable outcomes using consistent performance monitoring and continuous improvement.",
         ]
 
-    sections = []
-    sections.append(
-        "Executive Summary\n"
-        f"{org} respectfully submits this proposal foundation for the {g_title} opportunity to advance '{proj_title}' for {audience}. "
-        f"The proposed request is {req_str}, designed around a practical implementation strategy in the {client_sector} sector. "
-        f"The initiative responds to documented local barriers and will deploy targeted interventions over {timeline} with clear management milestones, partner accountability, and measurable deliverables. "
-        f"As a {category}, {org} is positioned to execute responsibly, align spending to allowable costs, and report outcomes in a reviewer-friendly format. "
-        f"The project combines direct service delivery, infrastructure support, and evaluation activities so that the funded work produces immediate impact while building sustainable long-term capacity."
-    )
-    sections.append(
-        "Statement of Need\n"
-        f"The need for this project is immediate and well documented: {need_context} "
-        f"Current conditions affecting {audience} include inconsistent access, delayed service engagement, and preventable outcomes that could be improved through earlier, coordinated intervention. "
-        f"Community stakeholders have repeatedly identified priority issues connected to {keywords_str or 'core community needs'}, and existing resources are not sufficient to close these gaps at the speed or scale required. "
-        "Without investment, the target population is likely to continue experiencing fragmented support and avoidable harm. "
-        "This proposal is intentionally designed to close those gaps through a focused, evidence-informed model that pairs operational discipline with participant-centered delivery."
-    )
-    sections.append(
-        "Program Design\n"
-        "The proposed program design translates strategy into execution by combining staffing, service protocols, and practical tools that address the root barriers described above. "
-        f"Project activities will include: (1) direct program services for {audience}; (2) deployment of project resources and equipment needed for reliable delivery; and (3) structured care and coordination workflows that improve continuity and follow-through. "
-        "The design uses phased implementation to ensure that the first months establish quality standards, compliance controls, and partner expectations before full-scale rollout. "
-        f"Operationally, the project will focus on {keywords_str or 'priority service areas'} while maintaining flexibility to adjust delivery methods based on monthly performance data. "
-        "All program components are built to satisfy federal grant standards for eligibility, documentation, and measurable outcomes."
-    )
-    sections.append(
-        "Target Population\n"
-        f"The target population for this initiative is {audience}. "
-        "Recruitment and engagement will prioritize individuals and households that face the highest barriers to access, including transportation constraints, digital access limitations, unstable income, or limited availability of local services. "
-        "Program communications will be delivered through trusted institutions and community partners to reduce participation friction and improve retention over time. "
-        "Service delivery protocols will emphasize cultural responsiveness, language accessibility where needed, and practical scheduling that reflects participant realities. "
-        "By aligning outreach, enrollment, and service cadence to the lived conditions of the target population, the project is expected to improve both participation quality and outcome durability."
-    )
-    sections.append(
-        "Implementation Plan\n"
-        f"Implementation will proceed over {timeline} with a milestone-based structure. "
-        "Month 1 will focus on startup activities, partner onboarding, baseline metrics, and procurement setup. "
-        "Months 2 through 9 will focus on full service delivery, case coordination, and monthly quality-improvement reviews. "
-        "Final months will emphasize performance validation, sustainability transition steps, and closeout readiness. "
-        "Leadership will conduct routine implementation reviews and maintain auditable records for spending, outputs, and participant outcomes. "
-        "Key objectives include: " + " ".join([f"({i+1}) {obj}" for i, obj in enumerate(objectives[:4])])
-    )
-    sections.append(
-        "Expected Outcomes\n"
-        f"Expected outcomes include improved access, higher engagement consistency, and measurable gains for {audience}. "
-        "The project will track both output and outcome indicators, including participation volume, service completion rates, timeliness, and targeted performance benchmarks tied to the core intervention model. "
-        "Management will review monthly dashboards and implement corrective actions when indicators fall below target thresholds. "
-        "By the end of the grant period, the organization expects to demonstrate a replicable model with stronger participant outcomes, improved operational reliability, and clear evidence of return on public investment."
-    )
-    sections.append(
-        "Organizational Capacity\n"
-        f"{org} has the leadership structure and operational maturity to manage this grant effectively. "
-        f"{budget_context} "
-        "Program governance includes defined responsibilities for executive oversight, fiscal management, procurement, and performance reporting. "
-        "Internal controls include expenditure documentation, segregation of duties, and regular management review of deliverables and compliance milestones. "
-        "The organization also maintains community partnerships that support referrals, implementation coordination, and continuity of services beyond the grant period."
+    match_clause = f" A documented strategy will satisfy the required {g_match}% match through eligible cash and in-kind contributions." if g_match > 0 else ""
+    ceiling_clause = (
+        f" Because the requested amount exceeds the published ceiling, this draft aligns budget assumptions to approximately {aligned_req_str} while preserving core outcomes through phased implementation."
+        if g_max > 0 and amount > g_max else ""
     )
 
-    budget_alignment_clause = ""
-    if g_max > 0 and amount > g_max:
-        budget_alignment_clause = (
-            f" Because the current request exceeds the published award ceiling, this draft aligns the proposed budget narrative to an allowable amount of approximately {aligned_req_str} while preserving core project outcomes through phased implementation."
-        )
-    match_clause = f" The budget also includes a strategy to satisfy the required {g_match}% match through eligible cash and in-kind contributions." if g_match > 0 else ""
-    sections.append(
-        "Budget Use\n"
-        f"Requested funds ({req_str}) will be allocated to allowable categories such as personnel, program supplies, technology/equipment, participant supports, data and evaluation, and grant administration required for compliant delivery. "
-        "Each budget category will be tied directly to implementation milestones and documented outputs to ensure transparent use of funds. "
-        f"The spending plan is designed for fiscal discipline and audit readiness, with monthly reconciliation and variance review.{budget_alignment_clause}{match_clause} "
-        "No unsupported or non-allowable costs are assumed in this draft framework, and final line-item detail should be refined against the selected opportunity guidance before submission."
-    )
-    sections.append(
-        "Sustainability and Long-Term Impact\n"
-        "Sustainability planning begins at project launch rather than at closeout. "
-        "The organization will document successful workflows, integrate high-performing practices into routine operations, and formalize partner commitments that can continue beyond the initial award period. "
-        "Performance findings will be used to inform future applications, braided funding strategies, and strategic budgeting decisions that protect service continuity for the target population. "
-        f"Prior to submission, leadership should re-verify eligibility, deadlines, and compliance details for {g_title} (deadline: {g_deadline})."
-        + (" The official opportunity link is included in the order details section of this draft." if g_url else "")
-        + " Final review by authorized leadership is required before submission."
-    )
+    sections = [
+        (
+            "Executive Summary\n"
+            f"{org} submits this proposal narrative for the {g_title} opportunity to implement '{proj_title}' for {audience}. "
+            f"As a {category}, the organization seeks {req_str} to execute a realistic, outcomes-driven initiative in the {client_sector} sector over {timeline}. "
+            "The plan combines direct service delivery, strong project governance, and measurable performance management so reviewers can quickly assess feasibility, readiness, and public value. "
+            "This request is designed to generate near-term improvements while establishing durable systems and partner coordination that outlast the award period."
+        ),
+        (
+            "Statement of Need\n"
+            f"The case for investment is clear: {need_context} "
+            f"For {audience}, current conditions reflect inconsistent access, delayed intervention, and fragmented service pathways that suppress outcomes and increase long-term community costs. "
+            f"Stakeholder feedback and local trend data indicate sustained pressure in areas tied to {keywords_str or 'core community needs'}, yet current resources are insufficient to close gaps at the required scale and speed. "
+            "Without targeted funding, these barriers are expected to persist, limiting equitable opportunity and weakening community resilience."
+        ),
+        (
+            "Program Description\n"
+            f"The proposed program will operate across {timeline} through a phased implementation model with defined milestones, accountable staffing, and monthly performance reviews. "
+            "Start-up activities will establish referral pathways, baseline indicators, procurement readiness, and partner roles; subsequent phases will deliver full programming with continuous quality improvement. "
+            "Core activities include " + " ".join([f"({i+1}) {obj}" for i, obj in enumerate(objectives[:4])]) + ". "
+            "Operational protocols emphasize compliance, documentation discipline, and adaptive management so the project remains responsive while protecting delivery quality and fiscal integrity."
+        ),
+        (
+            "Target Population\n"
+            f"The primary beneficiaries are {audience}, with outreach and service design calibrated to reduce practical barriers to participation and completion. "
+            "Implementation will prioritize accessibility, culturally responsive engagement, and scheduling flexibility to improve enrollment, retention, and participant success. "
+            "Expected impacts include stronger participation consistency, improved outcome indicators, and more stable support pathways for high-need groups. "
+            f"{budget_context} Requested funds will be allocated to allowable cost categories tied directly to outputs and outcomes, with monthly reconciliation and variance review.{ceiling_clause}{match_clause}"
+        ),
+        (
+            "Sustainability and Long-Term Impact\n"
+            "Sustainability planning begins at launch through workflow standardization, staff capability building, and formal partner commitments. "
+            "Performance data generated during implementation will inform future funding strategies, continuous program refinement, and responsible scaling decisions. "
+            f"Before submission, leadership should re-confirm eligibility and deadline requirements for {g_title} (deadline: {g_deadline})."
+            + (" The official Grants.gov notice link is included in the order details section." if g_url else "")
+            + " Final review and authorization are required before filing."
+        ),
+    ]
 
     return "\n\n".join(sections)
 
@@ -984,9 +961,7 @@ def get_offline():
 
 @app.get("/get/debug-paths")
 def get_debug_paths():
-    debug_enabled = os.getenv("ENABLE_DEBUG_ENDPOINT", "false").lower() == "true"
-    if not debug_enabled or not _is_internal_request():
-        return jsonify(ok=False, error="Not found"), 404
+    return jsonify(ok=False, error="Not found"), 404
 
     try:
         pdf_files = sorted(glob.glob(os.path.join(PDF_DIR, "*.pdf")), key=os.path.getmtime, reverse=True)
@@ -1113,7 +1088,6 @@ def create_checkout_session():
             }],
             success_url=f"{FRONTEND_THANKS_URL}?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{FRONTEND_URL}",
-            phone_number_collection={"enabled": False},
             metadata=metadata,
         )
     except Exception as e:
@@ -1276,6 +1250,8 @@ def download_by_session():
             return jsonify(ok=False, error="payment not completed"), 402
 
         row = find_log_by_session(session_id)
+        if row and not bool(row.get("paid")):
+            return jsonify(ok=False, error="payment not completed"), 402
         md = (s.metadata or {}) if s else {}
         order_id = (row.get("order_id") if row else None) or md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
 

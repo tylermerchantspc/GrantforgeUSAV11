@@ -12,11 +12,16 @@ import "./App.css";
 
 /* -------- Safe Grants.gov direct opportunity URL helper -------- */
 function safeProgramUrl(u, title, tags = [], row = {}) {
+  const oppNumber = (row.opportunity_number || row.opp_number || row.oppNumber || "").trim();
+  if (oppNumber) {
+    return `https://www.grants.gov/search-results-detail/${encodeURIComponent(oppNumber)}`;
+  }
+
   const official = row.official_url || row.program_url || u || "";
   if (typeof official === "string" && official.startsWith("http") && official.includes("grants.gov") && !official.includes("apply07.grants.gov") && !official.includes("grantsws/rest/opportunities/details")) {
     return official;
   }
-  const q = encodeURIComponent([title, ...(tags || [])].filter(Boolean).join(" ") || "federal grants");
+  const q = encodeURIComponent([oppNumber, title, ...(tags || [])].filter(Boolean).join(" ") || "federal grants");
   return `https://www.grants.gov/search-grants?keywords=${q}`;
 }
 
