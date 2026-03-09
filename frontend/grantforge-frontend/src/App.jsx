@@ -1,4 +1,4 @@
-// src/App.jsx — v1.5 (revenue-ready; Grants.gov links; backend v11.2 aligned)
+// src/App.jsx — production intake and checkout flow
 import { useEffect, useState } from "react";
 import {
   shortlist,
@@ -78,9 +78,7 @@ function ThanksScreen() {
         ) : (
           <p className="error">{err || "Preparing your file..."}</p>
         )}
-        <p className="muted">
-          Keep this link for your records. You may request edits before submitting to any funding organization.
-        </p>
+        <p className="muted">Keep this link for your records and internal review workflow.</p>
       </section>
 
       <footer className="footer">
@@ -247,7 +245,7 @@ function IntakeApp() {
           />
         </label>
 
-        <label>What do you need & when?
+        <label>Implementation Timeline
           <input
             value={timeline}
             onChange={e=>setTimeline(e.target.value)}
@@ -341,7 +339,7 @@ function IntakeApp() {
 
                     {previews[row.title] && (
                       <div className="preview">
-                        <p className="muted">Preview language — your paid draft is longer and fully formatted.</p>
+                        <p className="muted">Narrative preview (your purchased draft includes complete formatting and full detail).</p>
                         <pre>{previews[row.title]}</pre>
                       </div>
                     )}

@@ -29,7 +29,7 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")            # sk_test_... / s
 PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")      # pk_test_... / pk_live_...
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "") # whsec_...
 
-APP_MODE = os.getenv("APP_MODE", "test").lower()  # keep for environment-level behavior only
+APP_MODE = os.getenv("APP_MODE", "production").lower()
 
 # ===== Writable storage (Render dynos can only write to /tmp) =====
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/tmp/grantforge_v11")
@@ -170,10 +170,15 @@ def _csv_safe(value: Any) -> Any:
 def _sanitize_log_row(row: Dict[str, Any]) -> Dict[str, Any]:
     cleaned: Dict[str, Any] = {}
     for k, v in (row or {}).items():
-        if k in ("draft_body", "notes", "narrative", "summary"):
+        if k in ("draft_body", "notes", "project_notes", "narrative", "summary"):
             continue
         cleaned[k] = _csv_safe(v)
     return cleaned
+
+
+def _is_internal_request() -> bool:
+    ip = _client_ip()
+    return ip in ("127.0.0.1", "::1", "localhost")
 
 
 def _client_ip() -> str:
@@ -399,13 +404,16 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
     grant_terms = set()
     for token in (tags + summary_tokens):
         grant_terms.update([w for w in token.split() if len(w) > 2])
-    overlap = (set(kws) & (set(tags) | set(summary_tokens))) | (keyword_terms & grant_terms)
+    title_terms = normalized_tags(_norm_words(gr.get("title", "")))
+    program_terms = normalized_tags(_norm_words(gr.get("program", "")))
+    overlap = (set(kws) & (set(tags) | set(summary_tokens) | set(title_terms) | set(program_terms))) | (keyword_terms & grant_terms)
     if overlap:
         score += min(len(overlap), 5) * 8
         fit_notes.append("Keyword overlap: " + ", ".join(sorted(overlap)) + ".")
     else:
-        score -= 25
-        fit_notes.append("Weak keyword overlap with this opportunity.")
+        if kws:
+            score -= 25
+            fit_notes.append("Weak keyword overlap with this opportunity.")
 
     # 4) funding fit
     min_amt = _safe_float(gr.get("min_amount"), 0.0)
@@ -424,6 +432,11 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
         fit_notes.append(f"Ask (${amount:,.0f}) exceeds maximum (${max_amt:,.0f}).")
     else:
         score += 12
+        if max_amt > 0:
+            utilization_ratio = amount / max_amt
+            if 0.4 <= utilization_ratio <= 0.95:
+                score += 6
+                fit_notes.append("Requested funding is well-aligned with the published award range.")
 
     # deadline
     # 5) deadline validity
@@ -439,6 +452,8 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
         fit_notes.append(f"Requires approximately {req_match}% local match (cash or in-kind).")
 
     fit = "Strong Match" if score >= 130 else "Possible Match" if score >= 95 else "Low Match"
+    if kws and overlap:
+        score += min(len(set(overlap)), 4) * 2
     return {"score": score, "fit": fit, "fit_notes": " ".join(fit_notes)}
 
 
@@ -507,47 +522,76 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     include_expired = bool(payload.get("includeExpired"))
 
     rows = []
-    expired_rows = []
 
-    for gr in grants:
-        # hide expired unless explicitly requested
-        close_date = gr.get("close_date") or gr.get("deadline") or ""
-        is_expired = _is_expired(close_date)
-        if not include_expired and is_expired:
-            continue
+    def build_rows(eligibility_required: bool) -> List[Dict[str, Any]]:
+        built: List[Dict[str, Any]] = []
+        for gr in grants:
+            # hide expired unless explicitly requested
+            close_date = gr.get("close_date") or gr.get("deadline") or ""
+            is_expired = _is_expired(close_date)
+            if not include_expired and is_expired:
+                continue
 
-        if not _is_eligible_for_applicant(gr, applicant_type):
-            continue
+            if eligibility_required and not _is_eligible_for_applicant(gr, applicant_type):
+                continue
 
-        s = score_grant(gr, category, kws, amount)
-        if s["score"] < 95:
-            continue
+            s = score_grant(gr, category, kws, amount)
+            if s["score"] < 80:
+                continue
 
-        url = grant_display_url(gr)
-        row = {
-            "title": gr.get("title"),
-            "program": gr.get("program") or gr.get("program_id") or gr.get("program_url") or "unknown",
-            "program_url": url,  # not shown on free UI, used in paid PDF
-            "program_id": gr.get("program_id", ""),
-            "opp_id": gr.get("opp_id") or gr.get("opportunity_id") or "",
-            "opp_number": gr.get("opp_number") or gr.get("opportunity_number") or "",
-            "official_url": grant_display_url(gr),
-            "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
-            "deadline": close_date or "TBA",
-            "fit": s["fit"],
-            "score": s["score"],
-            "fit_notes": s["fit_notes"],
-            "requires_match_percent": gr.get("requires_match_percent", 0),
-            "max_amount": _safe_float(gr.get("max_amount"), 0),
-            "tags": gr.get("tags", []),
-            "sector": gr.get("sector", ""),
-            "summary": gr.get("summary", ""),
-            "level": "Federal",
-        }
-        if is_expired and not include_expired:
-            expired_rows.append(row)
-        else:
-            rows.append(row)
+            url = grant_display_url(gr)
+            built.append({
+                "title": gr.get("title"),
+                "program": gr.get("program") or gr.get("program_id") or gr.get("program_url") or "unknown",
+                "program_url": url,
+                "program_id": gr.get("program_id", ""),
+                "opp_id": gr.get("opp_id") or gr.get("opportunity_id") or "",
+                "opp_number": gr.get("opp_number") or gr.get("opportunity_number") or "",
+                "official_url": grant_display_url(gr),
+                "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
+                "deadline": close_date or "TBA",
+                "fit": s["fit"],
+                "score": s["score"],
+                "fit_notes": s["fit_notes"],
+                "requires_match_percent": gr.get("requires_match_percent", 0),
+                "max_amount": _safe_float(gr.get("max_amount"), 0),
+                "tags": gr.get("tags", []),
+                "sector": gr.get("sector", ""),
+                "summary": gr.get("summary", ""),
+                "level": "Federal",
+            })
+        return built
+
+    rows = build_rows(eligibility_required=True)
+    if not rows:
+        rows = build_rows(eligibility_required=False)
+    if not rows:
+        for gr in grants:
+            close_date = gr.get("close_date") or gr.get("deadline") or ""
+            if not include_expired and _is_expired(close_date):
+                continue
+            s = score_grant(gr, category, kws, amount)
+            url = grant_display_url(gr)
+            rows.append({
+                "title": gr.get("title"),
+                "program": gr.get("program") or gr.get("program_id") or gr.get("program_url") or "unknown",
+                "program_url": url,
+                "program_id": gr.get("program_id", ""),
+                "opp_id": gr.get("opp_id") or gr.get("opportunity_id") or "",
+                "opp_number": gr.get("opp_number") or gr.get("opportunity_number") or "",
+                "official_url": url,
+                "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
+                "deadline": close_date or "TBA",
+                "fit": s["fit"],
+                "score": s["score"],
+                "fit_notes": s["fit_notes"],
+                "requires_match_percent": gr.get("requires_match_percent", 0),
+                "max_amount": _safe_float(gr.get("max_amount"), 0),
+                "tags": gr.get("tags", []),
+                "sector": gr.get("sector", ""),
+                "summary": gr.get("summary", ""),
+                "level": "Federal",
+            })
 
     rows.sort(key=lambda r: (_safe_float(r.get("score"), 0), _safe_float(r.get("max_amount"), 0)), reverse=True)
 
@@ -643,8 +687,8 @@ def _mk_evaluation_lines(audience: str) -> List[str]:
     ]
 
 
-def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
-    """Build a polished, consultant-style narrative draft with structured sections."""
+def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
+    """Build a polished, senior grant-writer narrative draft with structured sections."""
     intake = dict(intake or {})
     intake.pop("state", None)
     intake.pop("eligible_state", None)
@@ -763,16 +807,21 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
         "No unsupported or non-allowable costs are assumed in this draft framework, and final line-item detail should be refined against the selected opportunity guidance before submission."
     )
     sections.append(
-        "Sustainability\n"
+        "Sustainability and Long-Term Impact\n"
         "Sustainability planning begins at project launch rather than at closeout. "
         "The organization will document successful workflows, integrate high-performing practices into routine operations, and formalize partner commitments that can continue beyond the initial award period. "
         "Performance findings will be used to inform future applications, braided funding strategies, and strategic budgeting decisions that protect service continuity for the target population. "
         f"Prior to submission, leadership should re-verify eligibility, deadlines, and compliance details for {g_title} (deadline: {g_deadline})."
-        + (f" Official opportunity details: {g_url}." if g_url else "")
-        + " Review and edit all draft materials before submission."
+        + (" The official opportunity link is included in the order details section of this draft." if g_url else "")
+        + " Final review by authorized leadership is required before submission."
     )
 
     return "\n\n".join(sections)
+
+
+def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
+    """Backward-compatible alias for narrative builder."""
+    return build_narrative(intake, grant)
 
 
 def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
@@ -831,6 +880,13 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
     def draw_line(text: str) -> int:
         return _wrap_draw_line(c, text, left_margin, y, width_chars=line_width_chars)
 
+    def draw_hyperlink(label: str, url: str) -> int:
+        display = f"{label}: View official Grants.gov opportunity"
+        c.drawString(left_margin, y, display)
+        text_width = c.stringWidth(display, "Helvetica", 10)
+        c.linkURL(url, (left_margin, y - 2, left_margin + text_width, y + 10), relative=0)
+        return y - 14
+
     draft_body = payload.get("draft_body")
     if isinstance(draft_body, str) and draft_body.strip():
         y = draw_section_header("Draft Narrative")
@@ -863,8 +919,14 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
                 y = new_page()
             y = draw_line(line)
 
+        grant_url = (payload.get("grant_url") or "").strip()
+        if grant_url:
+            y = draw_hyperlink("Official opportunity URL", grant_url)
+
         for k in sorted(payload.keys()):
             if k == "draft_body":
+                continue
+            if k in ("grant_url", "app_mode", "payment_status"):
                 continue
             v = payload[k]
             if y < bottom_margin:
@@ -922,9 +984,8 @@ def get_offline():
 
 @app.get("/get/debug-paths")
 def get_debug_paths():
-    debug_enabled = os.getenv("DEBUG", "false").lower() == "true"
-    trusted_ip = os.getenv("TRUSTED_DEBUG_IP", "127.0.0.1")
-    if not debug_enabled or _client_ip() != trusted_ip:
+    debug_enabled = os.getenv("ENABLE_DEBUG_ENDPOINT", "false").lower() == "true"
+    if not debug_enabled or not _is_internal_request():
         return jsonify(ok=False, error="Not found"), 404
 
     try:
@@ -971,7 +1032,7 @@ def preview():
             grant = short[0]
 
     # Build full draft, then shorten for preview
-    full_draft = build_draft_text(data, grant)
+    full_draft = build_narrative(data, grant)
     paras = full_draft.split("\n\n")
     preview_text = "\n\n".join(paras[:4])  # first few sections only
 
@@ -1016,7 +1077,7 @@ def create_checkout_session():
     order_id = datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
 
     # Build narrative draft now so PDF is ready immediately after checkout
-    draft_body = build_draft_text(data, grant)
+    draft_body = build_narrative(data, grant)
 
     grant_url = grant_display_url(grant) if grant else ""
 
@@ -1036,7 +1097,6 @@ def create_checkout_session():
         "keywords": (data.get("keywords") or "").strip(),
         "price": f"{price:.2f}",
         "refund_policy": "All sales final. No refunds.",
-        "app_mode": APP_MODE,
     }
 
     try:
@@ -1053,6 +1113,7 @@ def create_checkout_session():
             }],
             success_url=f"{FRONTEND_THANKS_URL}?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{FRONTEND_URL}",
+            phone_number_collection={"enabled": False},
             metadata=metadata,
         )
     except Exception as e:
