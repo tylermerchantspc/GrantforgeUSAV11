@@ -60,6 +60,10 @@ _RATE_LOCK = threading.Lock()
 
 _TOKEN_STORE: Dict[str, Dict[str, Any]] = {}
 _TOKEN_LOCK = threading.Lock()
+_CHECKOUT_REF_STORE: Dict[str, Dict[str, Any]] = {}
+_CHECKOUT_REF_LOCK = threading.Lock()
+_DRAFT_STORE: Dict[str, Dict[str, Any]] = {}
+_DRAFT_LOCK = threading.Lock()
 DEBUG_ENDPOINTS_ENABLED = os.getenv("ENABLE_DEBUG_ENDPOINTS", "false").lower() == "true"
 LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "30"))
 
@@ -218,12 +222,49 @@ def sanitize_payload(data: Dict[str, Any]) -> Dict[str, Any]:
                 "tags": [_sanitize_text(t, 80) for t in (v.get("tags") or [])][:20],
                 "requires_match_percent": int(_sanitize_numeric(v.get("requires_match_percent", 0), 0)),
             }
+        elif k == "recommendations" and isinstance(v, list):
+            out[k] = [
+                {
+                    "title": _sanitize_text((item or {}).get("title", ""), 200),
+                    "program_url": _sanitize_text((item or {}).get("program_url", ""), 500),
+                }
+                for item in v[:10]
+                if isinstance(item, dict)
+            ]
         elif k in allowed_text:
             out[k] = _sanitize_text(v, 500)
         else:
             out[k] = v
     return out
 
+
+
+
+def _validate_required_intake(data: Dict[str, Any]) -> Optional[str]:
+    required = {
+        "organization": _organization_name(data, default=""),
+        "category": (data.get("category") or data.get("who") or "").strip(),
+        "keywords": (data.get("keywords") or "").strip(),
+        "amountRequested": str(data.get("amountRequested", "")).strip(),
+        "annualBudget": str(data.get("annualBudget", "")).strip(),
+        "projectTitle": (data.get("projectTitle") or "").strip(),
+        "timeline": (data.get("timeline") or "").strip(),
+        "audience": (data.get("audience") or "").strip(),
+    }
+    missing = [k for k, v in required.items() if not v or v == "0.0"]
+    if missing:
+        labels = {
+            "organization": "organization name",
+            "category": "category",
+            "keywords": "keywords",
+            "amountRequested": "amount requested",
+            "annualBudget": "annual budget",
+            "projectTitle": "project title",
+            "timeline": "timeline",
+            "audience": "audience",
+        }
+        return "Missing required field(s): " + ", ".join(labels[m] for m in missing)
+    return None
 
 def _csv_safe(value: Any) -> Any:
     if value is None:
@@ -306,6 +347,47 @@ def _peek_token_session(token: str) -> Optional[str]:
         if rec.get("expires_at") < datetime.utcnow() or rec.get("used"):
             return None
         return rec.get("session_id")
+
+
+def _mint_checkout_ref(session_id: str) -> str:
+    token = secrets.token_urlsafe(24)
+    with _CHECKOUT_REF_LOCK:
+        _CHECKOUT_REF_STORE[token] = {
+            "session_id": session_id,
+            "expires_at": datetime.utcnow() + timedelta(seconds=TOKEN_TTL_SECONDS),
+            "used": False,
+        }
+    return token
+
+
+def _consume_checkout_ref(checkout_ref: str) -> Optional[str]:
+    if not checkout_ref:
+        return None
+    with _CHECKOUT_REF_LOCK:
+        rec = _CHECKOUT_REF_STORE.get(checkout_ref)
+        if not rec:
+            return None
+        if rec.get("used"):
+            return None
+        if rec.get("expires_at") < datetime.utcnow():
+            _CHECKOUT_REF_STORE.pop(checkout_ref, None)
+            return None
+        rec["used"] = True
+        return rec.get("session_id")
+
+
+def _store_draft(session_id: str, draft_body: str, recommendations: List[Dict[str, str]]) -> None:
+    with _DRAFT_LOCK:
+        _DRAFT_STORE[session_id] = {
+            "draft_body": draft_body,
+            "recommendations": recommendations,
+            "created_at": datetime.utcnow(),
+        }
+
+
+def _load_draft(session_id: str) -> Dict[str, Any]:
+    with _DRAFT_LOCK:
+        return dict(_DRAFT_STORE.get(session_id) or {})
 
 
 def _stripe_session_paid(session_id: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
@@ -842,40 +924,31 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
 
     sections = [
         (
-            "Summary\n"
-            f"{org} submits this proposal narrative for the {g_title} opportunity to implement '{proj_title}' for {audience}. "
-            f"As a {category}, the organization seeks {req_str} to execute a realistic, outcomes-driven initiative in the {client_sector} sector over {timeline}. "
-            "The plan combines direct service delivery, strong project governance, and measurable performance management so reviewers can quickly assess feasibility, readiness, and public value. "
-            "This request is designed to generate near-term improvements while establishing durable systems and partner coordination that outlast the award period."
+            "Overview\n"
+            f"{org} respectfully submits this narrative in response to the {g_title} opportunity to advance '{proj_title}' for {audience}. "
+            f"As a {category}, the organization requests {req_str} to execute a disciplined, outcomes-focused initiative in the {client_sector} sector across {timeline}. "
+            "The proposal presents a credible plan, clear governance, and measurable public benefit, positioning the project for strong implementation and responsible stewardship of federal resources."
         ),
         (
-            "Need Statement\n"
-            f"The case for investment is clear: {need_context} "
-            f"For {audience}, current conditions reflect inconsistent access, delayed intervention, and fragmented service pathways that suppress outcomes and increase long-term community costs. "
-            f"Stakeholder feedback and local trend data indicate sustained pressure in areas tied to {keywords_str or 'core community needs'}, yet current resources are insufficient to close gaps at the required scale and speed. "
-            "Without targeted funding, these barriers are expected to persist, limiting equitable opportunity and weakening community resilience."
+            "Objectives\n"
+            f"The funding request is grounded in documented need: {need_context} "
+            "Accordingly, the project will pursue the following objectives with clear accountability and performance tracking: "
+            + " ".join([f"({i+1}) {obj}" for i, obj in enumerate(objectives[:4])]) + ". "
+            "Each objective is designed to produce measurable improvements, strengthen service consistency, and align activities to grant priorities."
         ),
         (
-            "Program Description\n"
-            f"The proposed program will operate across {timeline} through a phased implementation model with defined milestones, accountable staffing, and monthly performance reviews. "
-            "Start-up activities will establish referral pathways, baseline indicators, procurement readiness, and partner roles; subsequent phases will deliver full programming with continuous quality improvement. "
-            "Core activities include " + " ".join([f"({i+1}) {obj}" for i, obj in enumerate(objectives[:4])]) + ". "
-            "Operational protocols emphasize compliance, documentation discipline, and adaptive management so the project remains responsive while protecting delivery quality and fiscal integrity."
+            "Implementation Plan\n"
+            f"Implementation will proceed through phased milestones over {timeline}, beginning with launch readiness and baseline assessment, followed by full service deployment and continuous quality improvement cycles. "
+            "Leadership will maintain monthly progress reviews, risk controls, procurement compliance, and documentation standards to ensure delivery fidelity. "
+            f"{budget_context} Requested funds will be allocated to allowable, impact-oriented cost categories with monthly reconciliation and variance oversight.{ceiling_clause}{match_clause}"
         ),
         (
-            "Target Population\n"
-            f"The primary beneficiaries are {audience}, with outreach and service design calibrated to reduce practical barriers to participation and completion. "
-            "Implementation will prioritize accessibility, culturally responsive engagement, and scheduling flexibility to improve enrollment, retention, and participant success. "
-            "Expected impacts include stronger participation consistency, improved outcome indicators, and more stable support pathways for high-need groups. "
-            f"{budget_context} Requested funds will be allocated to allowable cost categories tied directly to outputs and outcomes, with monthly reconciliation and variance review.{ceiling_clause}{match_clause}"
-        ),
-        (
-            "Sustainability and Long-Term Impact\n"
-            "Sustainability planning begins at launch through workflow standardization, staff capability building, and formal partner commitments. "
-            "Performance data generated during implementation will inform future funding strategies, continuous program refinement, and responsible scaling decisions. "
-            f"Before submission, leadership should re-confirm eligibility and deadline requirements for {g_title} (deadline: {g_deadline})."
+            "Impact\n"
+            f"The primary beneficiaries are {audience}. Expected impact includes improved access, stronger participation persistence, and measurable gains in core outcome indicators. "
+            "Beyond the grant period, the organization will sustain progress through workflow standardization, staff capability development, and coordinated partner commitments. "
+            f"Prior to submission, leadership will re-validate all requirements and deadlines for {g_title} (deadline: {g_deadline})."
             + (" The official Grants.gov notice link is included in the order details section." if g_url else "")
-            + " Final review and authorization are required before filing."
+            + " Final executive review and authorization will be completed before filing."
         ),
     ]
 
@@ -944,7 +1017,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
         return _wrap_draw_line(c, text, left_margin, y, width_chars=line_width_chars)
 
     def draw_hyperlink(label: str, url: str) -> int:
-        display = f"{label}: View official Grants.gov opportunity"
+        display = label
         c.setFillColorRGB(0.0, 0.2, 0.8)
         c.drawString(left_margin, y, display)
         text_width = c.stringWidth(display, "Helvetica", 10)
@@ -986,12 +1059,26 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
 
         grant_url = (payload.get("grant_url") or "").strip()
         if grant_url:
-            y = draw_hyperlink("Official opportunity URL", grant_url)
+            y = draw_hyperlink("Official opportunity URL: View official Grants.gov opportunity", grant_url)
+
+        recommendations = payload.get("recommendations") if isinstance(payload.get("recommendations"), list) else []
+        if recommendations:
+            if y < bottom_margin:
+                y = new_page()
+            y = draw_section_header("Recommended grant opportunities")
+            for rec in recommendations:
+                title = _sanitize_text((rec or {}).get("title", "Untitled opportunity"), 180)
+                rec_url = _sanitize_text((rec or {}).get("program_url", ""), 500)
+                if not rec_url:
+                    continue
+                if y < bottom_margin:
+                    y = new_page()
+                y = draw_hyperlink(title, rec_url)
 
         for k in sorted(payload.keys()):
             if k == "draft_body":
                 continue
-            if k in ("grant_url", "app_mode", "payment_status"):
+            if k in ("grant_url", "app_mode", "payment_status", "recommendations"):
                 continue
             v = payload[k]
             if y < bottom_margin:
@@ -1049,8 +1136,12 @@ def get_offline():
 
 @app.get("/get/debug-paths")
 def get_debug_paths():
-    if not DEBUG_ENDPOINTS_ENABLED:
+    debug_token = os.getenv("DEBUG_AUTH_TOKEN", "")
+    if APP_MODE != "development" or not DEBUG_ENDPOINTS_ENABLED:
         return jsonify(ok=False, error="Not found"), 404
+    provided = request.headers.get("X-Debug-Auth", "")
+    if not debug_token or provided != debug_token:
+        return jsonify(ok=False, error="Unauthorized"), 401
     return jsonify(ok=True, ts=_now_utc(), message="Debug endpoints enabled")
 
 
@@ -1061,6 +1152,10 @@ def questionnaire():
         data = sanitize_payload(request.get_json(force=True) or {})
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
+
+    missing_err = _validate_required_intake(data)
+    if missing_err:
+        return jsonify(ok=False, error=missing_err), 400
 
     org = _organization_name(data)
     results, has_strong_matches = shortlist(data)
@@ -1082,6 +1177,10 @@ def preview():
         data = sanitize_payload(request.get_json(force=True) or {})
     except Exception:
         return jsonify(ok=False, error="Invalid JSON"), 400
+
+    missing_err = _validate_required_intake(data)
+    if missing_err:
+        return jsonify(ok=False, error=missing_err), 400
 
     grant = data.get("grant") or {}
     if not grant:
@@ -1109,6 +1208,9 @@ def create_checkout_session():
         return jsonify(ok=False, error="Invalid JSON"), 400
 
     data = dict(data or {})
+    missing_err = _validate_required_intake(data)
+    if missing_err:
+        return jsonify(ok=False, error=missing_err), 400
 
     org = _organization_name(data, default="Customer")
     category = (data.get("category") or data.get("who") or "Other").strip()
@@ -1132,10 +1234,9 @@ def create_checkout_session():
 
     order_id = datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
 
-    # Build narrative draft now so PDF is ready immediately after checkout
     draft_body = build_narrative(data, grant)
-
     grant_url = grant_display_url(grant) if grant else ""
+    recommendations = data.get("recommendations") if isinstance(data.get("recommendations"), list) else []
 
     metadata = {
         "order_id": order_id,
@@ -1155,10 +1256,12 @@ def create_checkout_session():
         "refund_policy": "All sales final. No refunds.",
     }
 
+    checkout_ref = secrets.token_urlsafe(18)
     try:
         session = stripe.checkout.Session.create(
             mode="payment",
             payment_method_types=["card"],
+            phone_number_collection={"enabled": False},
             line_items=[{
                 "price_data": {
                     "currency": "usd",
@@ -1167,42 +1270,34 @@ def create_checkout_session():
                 },
                 "quantity": 1,
             }],
-            success_url=f"{FRONTEND_THANKS_URL}?session_id={{CHECKOUT_SESSION_ID}}",
+            success_url=f"{FRONTEND_THANKS_URL}?ref={checkout_ref}",
             cancel_url=f"{FRONTEND_URL}",
             metadata=metadata,
         )
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 400
 
+    with _CHECKOUT_REF_LOCK:
+        _CHECKOUT_REF_STORE[checkout_ref] = {
+            "session_id": session.id,
+            "expires_at": datetime.utcnow() + timedelta(seconds=TOKEN_TTL_SECONDS),
+            "used": False,
+        }
+    _store_draft(session.id, draft_body, recommendations)
+
     row = {
         "ts_utc": _now_utc(),
         "order_id": order_id,
-        "org": org,
         "organization_name": org,
-        "category": category,
-        "amountRequested": amount_req,
-        "annualBudget": annual_budget,
-        "grant_title": metadata["grant_title"],
-        "grant_program": metadata["grant_program"],
         "session_id": session.id,
-        "session_url": session.url,
-        "price": price,
+        "payment_status": "unpaid",
+        "amount_total": price,
         "pdf_path": "",
         "paid": False,
-        "draft_body": draft_body,
     }
     _append_payment_log_row(row)
 
-    # eager PDF (from metadata + draft_body)
-    try:
-        pdf_payload = dict(metadata)
-        pdf_payload["draft_body"] = draft_body
-        pdf_path = make_pdf(order_id, pdf_payload)
-        _update_payment_log_by("order_id", order_id, {"pdf_path": pdf_path})
-    except Exception:
-        pass
-
-    return jsonify(ok=True, url=session.url, sessionId=session.id, publishableKey=PUBLISHABLE_KEY)
+    return jsonify(ok=True, url=session.url, checkoutReference=checkout_ref, publishableKey=PUBLISHABLE_KEY)
 
 
 # ---------------- Stripe Webhook (reliable post-payment) ----------------
@@ -1223,26 +1318,27 @@ def stripe_webhook():
         session_id = session_obj.get("id")
         md = session_obj.get("metadata") or {}
 
-        # If we already generated a PDF at checkout, just mark as paid
         row = find_log_by_session(session_id)
-        if row and row.get("pdf_path") and os.path.exists(row["pdf_path"]):
-            _update_payment_log_by("session_id", session_id, {"paid": True})
-        else:
-            # Fallback: generate a basic PDF from metadata + payment info
-            order_id = md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
-            payload_for_pdf = dict(md)
-            payload_for_pdf.update({
-                "stripe_session_id": session_id,
-                "payment_status": session_obj.get("payment_status"),
-                "amount_total": session_obj.get("amount_total"),
-                "currency": session_obj.get("currency"),
-                "mode": session_obj.get("mode"),
+        order_id = (row.get("order_id") if row else None) or md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
+        draft_payload = _load_draft(session_id)
+        payload_for_pdf = dict(md)
+        payload_for_pdf.update({
+            "payment_status": session_obj.get("payment_status"),
+            "amount_total": session_obj.get("amount_total"),
+            "currency": session_obj.get("currency"),
+            "mode": session_obj.get("mode"),
+            "draft_body": draft_payload.get("draft_body", ""),
+            "recommendations": draft_payload.get("recommendations", []),
+        })
+        try:
+            pdf_path = make_pdf(order_id, payload_for_pdf)
+            _update_payment_log_by("session_id", session_id, {
+                "pdf_path": pdf_path,
+                "paid": True,
+                "payment_status": "paid",
             })
-            try:
-                pdf_path = make_pdf(order_id, payload_for_pdf)
-                _update_payment_log_by("session_id", session_id, {"pdf_path": pdf_path, "paid": True})
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     return jsonify(ok=True)
 
@@ -1251,9 +1347,13 @@ def stripe_webhook():
 @app.post("/create-download-token")
 def create_download_token():
     raw_body = sanitize_payload(request.get_json(silent=True) or {})
-    session_id = _sanitize_text(request.args.get("session_id") or raw_body.get("session_id"), 200)
+    checkout_ref = _sanitize_text(raw_body.get("checkout_ref"), 200)
+    if not checkout_ref:
+        return jsonify(ok=False, error="missing checkout_ref"), 400
+
+    session_id = _consume_checkout_ref(checkout_ref)
     if not session_id:
-        return jsonify(ok=False, error="missing session_id"), 400
+        return jsonify(ok=False, error="invalid or expired checkout reference"), 400
 
     paid, _s, err = _stripe_session_paid(session_id)
     if err:
@@ -1262,7 +1362,7 @@ def create_download_token():
         return jsonify(ok=False, error="payment not completed"), 402
 
     token = _mint_download_token(session_id)
-    _update_payment_log_by("session_id", session_id, {"paid": True})
+    _update_payment_log_by("session_id", session_id, {"paid": True, "payment_status": "paid"})
     return jsonify(ok=True, token=token, expires_in=TOKEN_TTL_SECONDS)
 
 
@@ -1337,14 +1437,16 @@ def download_by_session():
 
         pdf_path = row.get("pdf_path") if row else ""
         if not (pdf_path and os.path.exists(pdf_path)):
+            draft_payload = _load_draft(session_id)
             pdf_payload = dict(md)
-            if not pdf_payload.get("draft_body") and row and row.get("draft_body"):
-                pdf_payload["draft_body"] = row.get("draft_body")
+            pdf_payload["draft_body"] = draft_payload.get("draft_body", "")
+            pdf_payload["recommendations"] = draft_payload.get("recommendations", [])
             pdf_path = make_pdf(order_id, pdf_payload)
             _update_payment_log_by("session_id", session_id, {
                 "order_id": order_id,
                 "pdf_path": pdf_path,
                 "paid": True,
+                "payment_status": "paid",
             })
 
         if not (pdf_path and os.path.exists(pdf_path)):

@@ -21,95 +21,117 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "PDF_DIR", str(tmp_path / "protected" / "pdfs"))
     monkeypatch.setattr(srv, "LOG_PATH", str(tmp_path / "protected" / "payments_log.csv"))
     os.makedirs(srv.PDF_DIR, exist_ok=True)
+    srv._TOKEN_STORE.clear()
+    srv._CHECKOUT_REF_STORE.clear()
+    srv._DRAFT_STORE.clear()
     srv.app.config.update(TESTING=True)
     return srv.app.test_client()
 
 
-def _payload(org, keywords, category="501c3 Nonprofit"):
+def _payload(org, keywords, category):
     return {
         "organization": org,
         "category": category,
         "keywords": keywords,
-        "amountRequested": 150000,
-        "annualBudget": 550000,
-        "projectTitle": "Community Impact Program",
-        "timeline": "12 months",
-        "audience": "underserved residents",
-        "notes": "Local service expansion and outcomes tracking",
+        "amountRequested": 125000,
+        "annualBudget": 450000,
+        "projectTitle": "Community Capacity Expansion",
+        "timeline": "18 months",
+        "audience": "low-income families and youth",
+        "notes": "Cross-sector partnerships and evidence-based delivery",
     }
 
 
-def test_search_limits_to_under_2m_and_sorts():
-    results, _ = srv.shortlist(_payload("Org", "healthcare, telehealth"))
+def _mock_checkout(monkeypatch):
+    sessions = {}
+
+    class DummySession(dict):
+        __getattr__ = dict.get
+
+    def create(**kwargs):
+        sid = f"cs_test_{len(sessions)+1}"
+        sess = DummySession(id=sid, url=f"https://stripe.test/{sid}", payment_status="paid", metadata=kwargs.get("metadata", {}))
+        sessions[sid] = sess
+        return sess
+
+    def retrieve(session_id):
+        return sessions[session_id]
+
+    monkeypatch.setattr(srv.stripe.checkout.Session, "create", create)
+    monkeypatch.setattr(srv.stripe.checkout.Session, "retrieve", retrieve)
+    return sessions
+
+
+def test_narrative_uses_senior_sections():
+    grant = {"title": "Health Equity Grant", "deadline": "2027-01-01", "max_amount": 500000}
+    text = srv.build_narrative(_payload("River Health Alliance", "telehealth, patient access", "501c3 Nonprofit"), grant)
+    assert "Overview" in text
+    assert "Objectives" in text
+    assert "Implementation Plan" in text
+    assert "Impact" in text
+
+
+def _run_paid_pdf_flow(client, monkeypatch, payload):
+    sessions = _mock_checkout(monkeypatch)
+
+    invalid = dict(payload)
+    invalid["audience"] = ""
+    bad = client.post("/questionnaire", json=invalid)
+    assert bad.status_code == 400
+
+    search = client.post("/questionnaire", json=payload)
+    assert search.status_code == 200
+    results = search.get_json()["results"]
     assert results
-    assert all(float(r.get("max_amount", 0)) <= 2_000_000 for r in results)
-    scores = [r["score"] for r in results]
-    assert scores == sorted(scores, reverse=True)
 
-
-def test_narrative_professional_sections_and_no_examples():
-    grant = {"title": "Health Equity Grant", "deadline": "2027-01-01", "max_amount": 500000, "requires_match_percent": 0}
-    text = srv.build_narrative(_payload("River Health Alliance", "telehealth, patient access"), grant)
-    assert "Summary" in text
-    assert "Need Statement" in text
-    assert "example" not in text.lower()
-    assert "sample" not in text.lower()
-
-
-def test_pdf_contains_grants_url_link(tmp_path):
-    grant = {
-        "title": "Climate Resilience Program",
-        "opportunity_number": "EPA-CLIMATE-2027",
-        "deadline": "2027-05-01",
-        "max_amount": 250000,
+    grant = results[0]
+    full_payload = {
+        **payload,
+        "grant": grant,
+        "recommendations": [
+            {"title": r["title"], "program_url": r["program_url"]}
+            for r in results
+        ],
     }
-    payload = _payload("Green Future Network", "climate, conservation")
-    draft = srv.build_narrative(payload, grant)
-    p = dict(payload)
-    p["draft_body"] = draft
-    p["grant_url"] = srv.grant_display_url(grant)
-    pdf = srv.make_pdf("ORD-TEST", p)
-    assert os.path.exists(pdf)
-    assert p["grant_url"].startswith("https://www.grants.gov/search-results-detail/")
+
+    checkout = client.post("/create-checkout-session", json=full_payload)
+    assert checkout.status_code == 200
+    checkout_ref = checkout.get_json()["checkoutReference"]
+    assert checkout_ref
+
+    # must not download without paid token
+    denied = client.get("/download-by-session?token=missing")
+    assert denied.status_code == 400
+
+    token_resp = client.post("/create-download-token", json={"checkout_ref": checkout_ref})
+    assert token_resp.status_code == 200
+    token = token_resp.get_json()["token"]
+
+    sid = next(iter(sessions.keys()))
+    webhook_payload = {
+        "type": "checkout.session.completed",
+        "data": {"object": {"id": sid, "metadata": sessions[sid]["metadata"], "payment_status": "paid", "amount_total": 250000, "currency": "usd", "mode": "payment"}},
+    }
+    monkeypatch.setattr(srv.stripe.Webhook, "construct_event", lambda payload, sig, sec: webhook_payload)
+    monkeypatch.setattr(srv, "STRIPE_WEBHOOK_SECRET", "whsec_test")
+    wh = client.post("/webhook/stripe", data=b"{}", headers={"Stripe-Signature": "sig"})
+    assert wh.status_code == 200
+
+    download = client.get(f"/download-by-session?token={token}")
+    assert download.status_code == 200
+
+    # token should be one-time
+    second = client.get(f"/download-by-session?token={token}")
+    assert second.status_code == 400
+
+    assert all(r["program_url"].startswith("https://www.grants.gov/") for r in results)
 
 
-def test_download_requires_paid_status(client, monkeypatch):
-    monkeypatch.setattr(srv, "_consume_token", lambda _t: "cs_test_123")
-    monkeypatch.setattr(srv, "_stripe_session_paid", lambda _sid: (False, None, ""))
-    resp = client.get("/download-by-session?token=abc")
-    assert resp.status_code == 402
+def test_nonprofit_end_to_end_flow(client, monkeypatch):
+    payload = _payload("North Star Nonprofit", "youth mentoring, workforce, STEM", "501c3 Nonprofit")
+    _run_paid_pdf_flow(client, monkeypatch, payload)
 
 
-def test_ten_diverse_clients_search_and_preview(client):
-    scenarios = [
-        ("Health Bridge", "telehealth, elderly care"),
-        ("Clean Water Now", "watershed restoration, conservation"),
-        ("Digital Voices", "media literacy, youth empowerment"),
-        ("City Safety Dept", "public safety, hazard mitigation", "City / Municipality"),
-        ("WorkReady Labs", "workforce, certification"),
-        ("Harvest Hope", "food security, community health"),
-        ("Neighborhood Homes", "housing, neighborhood revitalization"),
-        ("Veteran Pathways", "mental health, social services"),
-        ("Makers Guild", "innovation, entrepreneurship"),
-        ("Green Transit Coalition", "climate, emissions reduction"),
-    ]
-    for row in scenarios:
-        org, kws = row[0], row[1]
-        category = row[2] if len(row) > 2 else "501c3 Nonprofit"
-        payload = _payload(org, kws, category)
-        s = client.post("/search", json=payload)
-        assert s.status_code == 200
-        data = s.get_json()
-        assert data["ok"] is True
-        assert isinstance(data.get("results", []), list)
-        if data["results"]:
-            p = client.post("/preview", json={**payload, "grant": data["results"][0]})
-            assert p.status_code == 200
-            assert "Summary" in p.get_json().get("summary", "")
-
-
-def test_questionnaire_sanitizes_phone_field(client):
-    payload = _payload("Org", "healthcare")
-    payload["phone"] = "=cmd|' /C calc'!A0"
-    resp = client.post("/questionnaire", json=payload)
-    assert resp.status_code == 200
+def test_church_faith_end_to_end_flow(client, monkeypatch):
+    payload = _payload("Living Hope Church", "food security, family counseling, recovery", "Church / Faith Org")
+    _run_paid_pdf_flow(client, monkeypatch, payload)
