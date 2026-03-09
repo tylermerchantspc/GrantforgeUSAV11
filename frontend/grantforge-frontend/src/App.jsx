@@ -33,15 +33,15 @@ function ThanksScreen() {
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
-    const sid = p.get("session_id");
-    if (!sid) { setErr("Missing Stripe session id."); return; }
+    const checkoutRef = p.get("ref");
+    if (!checkoutRef) { setErr("Missing secure checkout reference."); return; }
 
     let mounted = true;
     let tries = 0;
 
     const poll = async () => {
       try {
-        const t = await createDownloadToken(sid);
+        const t = await createDownloadToken(checkoutRef);
         if (t && t.ok && t.token) {
           const r = await receiptByToken(t.token);
           if (r && r.ok) {
@@ -114,6 +114,7 @@ function IntakeApp() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [previewBusy, setPreviewBusy] = useState({}); // per-row preview spinner/lock
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const federalResults = results;
 
@@ -132,10 +133,24 @@ function IntakeApp() {
     };
   }
 
+  function validateRequiredFields() {
+    const errors = {};
+    if (!org.trim()) errors.org = "Organization name is required.";
+    if (!who.trim()) errors.who = "Please choose your organization category.";
+    if (!keywords.trim()) errors.keywords = "Keywords are required.";
+    if (!amountRequested.toString().trim()) errors.amountRequested = "Amount requested is required.";
+    if (!annualBudget.toString().trim()) errors.annualBudget = "Annual budget is required.";
+    if (!projectTitle.trim()) errors.projectTitle = "Project title is required.";
+    if (!timeline.trim()) errors.timeline = "Implementation timeline is required.";
+    if (!audience.trim()) errors.audience = "Target audience is required.";
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  }
+
   async function handleSeeRecommendations() {
     setError("");
-    if (!org.trim() || !keywords.trim()) {
-      setError("Organization and keywords are required.");
+    if (!validateRequiredFields()) {
+      setError("Please complete the required fields before continuing.");
       return;
     }
     setLoading(true);
@@ -170,9 +185,20 @@ function IntakeApp() {
 
   async function handlePay(row) {
     setError("");
+    if (!validateRequiredFields()) {
+      setError("Please complete all required fields before checkout.");
+      return;
+    }
     setLoading(true);
     try {
-      const body = { ...intakePayload(), grant: row };
+      const body = {
+        ...intakePayload(),
+        grant: row,
+        recommendations: federalResults.map((r) => ({
+          title: r.title,
+          program_url: safeProgramUrl(r.program_url, r.title, r.tags, r),
+        })),
+      };
       const data = await createCheckoutSession(body);
       if (!data.ok) throw new Error(data.error || "Checkout failed.");
       window.location.href = data.url;
@@ -204,6 +230,7 @@ function IntakeApp() {
             onChange={e=>setOrg(e.target.value)}
             required
           />
+          {fieldErrors.org && <span className="error">{fieldErrors.org}</span>}
         </label>
 
         <label>Who are you?
@@ -217,6 +244,7 @@ function IntakeApp() {
             <option>City / Municipality</option>
             <option>Other</option>
           </select>
+          {fieldErrors.who && <span className="error">{fieldErrors.who}</span>}
         </label>
 
         <label>Keywords (comma separated)
@@ -225,6 +253,7 @@ function IntakeApp() {
             onChange={e=>setKeywords(e.target.value)}
             required
           />
+          {fieldErrors.keywords && <span className="error">{fieldErrors.keywords}</span>}
         </label>
 
         <div className="grid2">
@@ -235,6 +264,7 @@ function IntakeApp() {
               onChange={e=>setAmountRequested(e.target.value)}
               
             />
+            {fieldErrors.amountRequested && <span className="error">{fieldErrors.amountRequested}</span>}
           </label>
           <label>Annual Budget (USD)
             <input
@@ -243,6 +273,7 @@ function IntakeApp() {
               onChange={e=>setAnnualBudget(e.target.value)}
               
             />
+            {fieldErrors.annualBudget && <span className="error">{fieldErrors.annualBudget}</span>}
           </label>
         </div>
 
@@ -252,6 +283,7 @@ function IntakeApp() {
             onChange={e=>setProjectTitle(e.target.value)}
             
           />
+          {fieldErrors.projectTitle && <span className="error">{fieldErrors.projectTitle}</span>}
         </label>
 
         <label>Implementation Timeline
@@ -260,6 +292,7 @@ function IntakeApp() {
             onChange={e=>setTimeline(e.target.value)}
             
           />
+          {fieldErrors.timeline && <span className="error">{fieldErrors.timeline}</span>}
         </label>
 
         <label>Audience / Who benefits?
@@ -268,6 +301,7 @@ function IntakeApp() {
             onChange={e=>setAudience(e.target.value)}
             
           />
+          {fieldErrors.audience && <span className="error">{fieldErrors.audience}</span>}
         </label>
 
         <label>Notes (optional)

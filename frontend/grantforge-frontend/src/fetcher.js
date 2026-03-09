@@ -79,11 +79,11 @@ export async function createCheckoutSession(payload) {
   });
 }
 
-export async function createDownloadToken(sessionId) {
+export async function createDownloadToken(checkoutRef) {
   return safeFetch(ENDPOINTS.createDownloadToken, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId }),
+    body: JSON.stringify({ checkout_ref: checkoutRef }),
   });
 }
 
