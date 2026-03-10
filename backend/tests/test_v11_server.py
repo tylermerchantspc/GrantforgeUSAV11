@@ -24,6 +24,7 @@ def client(tmp_path, monkeypatch):
     srv._TOKEN_STORE.clear()
     srv._CHECKOUT_REF_STORE.clear()
     srv._DRAFT_STORE.clear()
+    srv._COMPLETED_DOWNLOADS.clear()
     srv.app.config.update(TESTING=True)
     return srv.app.test_client()
 
@@ -124,7 +125,7 @@ def _run_paid_pdf_flow(client, monkeypatch, payload):
     second = client.get(f"/download-by-session?token={token}")
     assert second.status_code == 400
 
-    assert all(r["program_url"].startswith("https://www.grants.gov/") for r in results)
+    assert all(r["program_url"].startswith("https://www.grants.gov/search-results-detail/") for r in results)
 
 
 def test_nonprofit_end_to_end_flow(client, monkeypatch):
@@ -135,3 +136,45 @@ def test_nonprofit_end_to_end_flow(client, monkeypatch):
 def test_church_faith_end_to_end_flow(client, monkeypatch):
     payload = _payload("Living Hope Church", "food security, family counseling, recovery", "Church / Faith Org")
     _run_paid_pdf_flow(client, monkeypatch, payload)
+
+
+def test_receipt_requires_paid_session(client, monkeypatch):
+    sessions = _mock_checkout(monkeypatch)
+
+    def create_unpaid(**kwargs):
+        sid = f"cs_test_unpaid_{len(sessions)+1}"
+        class DummySession(dict):
+            __getattr__ = dict.get
+        sess = DummySession(id=sid, url=f"https://stripe.test/{sid}", payment_status="unpaid", metadata=kwargs.get("metadata", {}))
+        sessions[sid] = sess
+        return sess
+
+    monkeypatch.setattr(srv.stripe.checkout.Session, "create", create_unpaid)
+
+    payload = _payload("Unpaid Org", "housing, resilience", "501c3 Nonprofit")
+    recs = client.post("/questionnaire", json=payload).get_json()["results"]
+    checkout = client.post("/create-checkout-session", json={**payload, "grant": recs[0], "recommendations": recs})
+    checkout_ref = checkout.get_json()["checkoutReference"]
+
+    token_resp = client.post("/create-download-token", json={"checkout_ref": checkout_ref})
+    assert token_resp.status_code == 402
+
+
+def test_session_cannot_be_reused_after_download(client, monkeypatch):
+    payload = _payload("ReUse Block Org", "workforce, youth", "Church / Faith Org")
+    sessions = _mock_checkout(monkeypatch)
+    recs = client.post("/questionnaire", json=payload).get_json()["results"]
+    checkout = client.post("/create-checkout-session", json={**payload, "grant": recs[0], "recommendations": recs})
+    token_resp = client.post("/create-download-token", json={"checkout_ref": checkout.get_json()["checkoutReference"]})
+    token = token_resp.get_json()["token"]
+
+    first_download = client.get(f"/download-by-session?token={token}")
+    assert first_download.status_code == 200
+
+    sid = next(iter(sessions.keys()))
+    new_token = srv._mint_download_token(sid)
+    receipt = client.get(f"/receipt?token={new_token}")
+    assert receipt.status_code == 409
+
+    second_download = client.get(f"/download-by-session?token={new_token}")
+    assert second_download.status_code == 409
