@@ -12,16 +12,18 @@ import "./App.css";
 
 /* -------- Safe Grants.gov direct opportunity URL helper -------- */
 function safeProgramUrl(u, title, tags = [], row = {}) {
-  const oppNumber = (row.opportunity_number || row.opp_number || row.oppNumber || "").trim();
-  if (oppNumber) {
-    return `https://www.grants.gov/search-results-detail/${encodeURIComponent(oppNumber)}`;
+  const oppNumber = (row.opportunity_number || row.opp_number || row.oppNumber || row.funding_opportunity_number || "").trim();
+  const cfda = (row.cfda || row.cfda_number || row.assistance_listing_number || "").trim();
+  const identifier = oppNumber || cfda;
+  if (identifier) {
+    return `https://www.grants.gov/search-results-detail/${encodeURIComponent(identifier)}`;
   }
 
   const official = row.official_url || row.program_url || u || "";
   if (typeof official === "string" && official.startsWith("http") && official.includes("grants.gov") && !official.includes("apply07.grants.gov") && !official.includes("grantsws/rest/opportunities/details")) {
     return official;
   }
-  const q = encodeURIComponent([oppNumber, title, ...(tags || [])].filter(Boolean).join(" ") || "federal grants");
+  const q = encodeURIComponent([identifier, title, ...(tags || [])].filter(Boolean).join(" ") || "federal grants");
   return `https://www.grants.gov/search-grants?keywords=${q}`;
 }
 
@@ -73,7 +75,7 @@ function ThanksScreen() {
         <p><em>"Unless the Lord builds the house, the builders labor in vain."</em> — Psalm 127:1</p>
       </header>
 
-      <section className="card">
+      <section className="card" aria-live="polite">
         <h2>Your grant narrative is ready</h2>
         {url ? (
           <p>
@@ -226,6 +228,8 @@ function IntakeApp() {
 
         <label>Organization
           <input
+            aria-label="Organization name"
+            aria-invalid={!!fieldErrors.org}
             value={org}
             onChange={e=>setOrg(e.target.value)}
             required
@@ -234,7 +238,7 @@ function IntakeApp() {
         </label>
 
         <label>Who are you?
-          <select value={who} onChange={e=>setWho(e.target.value)}>
+          <select aria-label="Organization category" aria-invalid={!!fieldErrors.who} value={who} onChange={e=>setWho(e.target.value)}>
             <option value="">Select a category</option>
             <option>Teacher (Classroom)</option>
             <option>School / District</option>
@@ -249,6 +253,8 @@ function IntakeApp() {
 
         <label>Keywords (comma separated)
           <input
+            aria-label="Keywords"
+            aria-invalid={!!fieldErrors.keywords}
             value={keywords}
             onChange={e=>setKeywords(e.target.value)}
             required
@@ -260,6 +266,8 @@ function IntakeApp() {
           <label>Amount Requested (USD)
             <input
               type="number"
+              aria-label="Amount requested"
+              aria-invalid={!!fieldErrors.amountRequested}
               value={amountRequested}
               onChange={e=>setAmountRequested(e.target.value)}
               
@@ -269,6 +277,8 @@ function IntakeApp() {
           <label>Annual Budget (USD)
             <input
               type="number"
+              aria-label="Annual budget"
+              aria-invalid={!!fieldErrors.annualBudget}
               value={annualBudget}
               onChange={e=>setAnnualBudget(e.target.value)}
               
@@ -279,6 +289,8 @@ function IntakeApp() {
 
         <label>Project Title
           <input
+            aria-label="Project title"
+            aria-invalid={!!fieldErrors.projectTitle}
             value={projectTitle}
             onChange={e=>setProjectTitle(e.target.value)}
             
@@ -288,6 +300,8 @@ function IntakeApp() {
 
         <label>Implementation Timeline
           <input
+            aria-label="Implementation timeline"
+            aria-invalid={!!fieldErrors.timeline}
             value={timeline}
             onChange={e=>setTimeline(e.target.value)}
             
@@ -297,6 +311,8 @@ function IntakeApp() {
 
         <label>Audience / Who benefits?
           <input
+            aria-label="Target audience"
+            aria-invalid={!!fieldErrors.audience}
             value={audience}
             onChange={e=>setAudience(e.target.value)}
             
@@ -316,7 +332,7 @@ function IntakeApp() {
         <button disabled={loading} onClick={handleSeeRecommendations}>
           {loading ? "Finding matches..." : "See Recommendations"}
         </button>
-        {error && <p className="error">{error}</p>}
+        {error && <p className="error" role="alert">{error}</p>}
       </section>
 
       {results.length > 0 && (

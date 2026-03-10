@@ -60,6 +60,8 @@ _RATE_LOCK = threading.Lock()
 
 _TOKEN_STORE: Dict[str, Dict[str, Any]] = {}
 _TOKEN_LOCK = threading.Lock()
+_COMPLETED_DOWNLOADS: set[str] = set()
+_COMPLETED_DOWNLOADS_LOCK = threading.Lock()
 _CHECKOUT_REF_STORE: Dict[str, Dict[str, Any]] = {}
 _CHECKOUT_REF_LOCK = threading.Lock()
 _DRAFT_STORE: Dict[str, Dict[str, Any]] = {}
@@ -423,8 +425,16 @@ def fallback_grants_gov_url(title: str, tags: List[str], opp_number: str = "") -
     return f"https://www.grants.gov/search-grants?keywords={q.replace(' ', '%20')}"
 
 
+def _first_identifier(gr: Dict[str, Any], *keys: str) -> str:
+    for k in keys:
+        val = str(gr.get(k) or "").strip()
+        if val:
+            return val
+    return ""
+
+
 def grants_gov_notice_url(opp_number: str) -> str:
-    clean_opp = (opp_number or "").strip()
+    clean_opp = re.sub(r"\s+", " ", (opp_number or "").strip())
     if not clean_opp:
         return ""
     encoded = re.sub(r"\s+", "%20", clean_opp)
@@ -454,37 +464,39 @@ def grant_display_url(gr: Dict[str, Any]) -> str:
       2) funding_url/program_url if valid modern grants.gov URL
       3) grants.gov search URL
     """
-    opp_id = str(
-        gr.get("opportunity_id")
-        or gr.get("oppId")
-        or gr.get("opp_id")
-        or gr.get("program_id")
-        or ""
-    ).strip()
-    opp_number = str(
-        gr.get("opportunity_number")
-        or gr.get("oppNumber")
-        or gr.get("opp_number")
-        or ""
-    ).strip()
+    opp_id = _first_identifier(gr, "opportunity_id", "oppId", "opp_id", "program_id")
+    opp_number = _first_identifier(gr, "opportunity_number", "oppNumber", "opp_number", "funding_opportunity_number")
+    cfda_number = _first_identifier(gr, "cfda", "cfda_number", "assistance_listing", "assistance_listing_number")
 
-    notice_url = grants_gov_notice_url(opp_number)
+    canonical_identifier = opp_number or cfda_number or opp_id
+
+    notice_url = grants_gov_notice_url(canonical_identifier)
     if notice_url:
         return notice_url
 
     official_url = (gr.get("official_url") or "").strip()
     if official_url:
-        return _ensure_http_url(official_url, gr.get("title", ""), gr.get("tags", []) or [], opp_number)
+        return _ensure_http_url(official_url, gr.get("title", ""), gr.get("tags", []) or [], canonical_identifier)
 
     raw = gr.get("funding_url") or gr.get("program_url") or ""
     if raw:
-        return _safe_grants_url(raw, gr.get("title", ""), gr.get("tags", []) or [], opp_number)
+        return _safe_grants_url(raw, gr.get("title", ""), gr.get("tags", []) or [], canonical_identifier)
 
-    if opp_id or opp_number:
-        q = " ".join([gr.get("title", ""), opp_id, opp_number]).strip()
-        return fallback_grants_gov_url(q, gr.get("tags", []) or [], opp_number)
+    if opp_id or canonical_identifier:
+        q = " ".join([gr.get("title", ""), opp_id, canonical_identifier]).strip()
+        return fallback_grants_gov_url(q, gr.get("tags", []) or [], canonical_identifier)
 
-    return fallback_grants_gov_url(gr.get("title", ""), gr.get("tags", []) or [], opp_number)
+    return fallback_grants_gov_url(gr.get("title", ""), gr.get("tags", []) or [], canonical_identifier)
+
+
+def _is_session_already_downloaded(session_id: str) -> bool:
+    with _COMPLETED_DOWNLOADS_LOCK:
+        return session_id in _COMPLETED_DOWNLOADS
+
+
+def _mark_session_downloaded(session_id: str) -> None:
+    with _COMPLETED_DOWNLOADS_LOCK:
+        _COMPLETED_DOWNLOADS.add(session_id)
 
 
 def _pdf_header_mode_note() -> str:
@@ -1355,6 +1367,9 @@ def create_download_token():
     if not session_id:
         return jsonify(ok=False, error="invalid or expired checkout reference"), 400
 
+    if _is_session_already_downloaded(session_id):
+        return jsonify(ok=False, error="download already completed for this session"), 409
+
     paid, _s, err = _stripe_session_paid(session_id)
     if err:
         return jsonify(ok=False, error=f"Stripe lookup failed: {err}"), 400
@@ -1381,6 +1396,9 @@ def receipt():
         return jsonify(ok=False, error=f"Stripe lookup failed: {err}"), 400
     if not paid:
         return jsonify(ok=False, error="payment not completed"), 402
+
+    if _is_session_already_downloaded(session_id):
+        return jsonify(ok=False, error="download already completed for this order"), 409
 
     row = find_log_by_session(session_id)
     if not row:
@@ -1425,6 +1443,9 @@ def download_by_session():
         if not session_id:
             return jsonify(ok=False, error="invalid, expired, or already-used token"), 400
 
+        if _is_session_already_downloaded(session_id):
+            return jsonify(ok=False, error="download already completed for this order"), 409
+
         paid, s, err = _stripe_session_paid(session_id)
         if err:
             return jsonify(ok=False, error=f"Stripe lookup failed: {err}"), 400
@@ -1436,6 +1457,8 @@ def download_by_session():
         order_id = (row.get("order_id") if row else None) or md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
 
         pdf_path = row.get("pdf_path") if row else ""
+        if not isinstance(pdf_path, str):
+            pdf_path = ""
         if not (pdf_path and os.path.exists(pdf_path)):
             draft_payload = _load_draft(session_id)
             pdf_payload = dict(md)
@@ -1452,6 +1475,7 @@ def download_by_session():
         if not (pdf_path and os.path.exists(pdf_path)):
             return jsonify(ok=False, error="PDF not found yet; try again in a moment."), 404
 
+        _mark_session_downloaded(session_id)
         name = os.path.basename(pdf_path) or f"{order_id}.pdf"
         return send_file(pdf_path, as_attachment=True, download_name=name, mimetype="application/pdf")
     except Exception as e:
