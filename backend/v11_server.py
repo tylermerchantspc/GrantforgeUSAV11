@@ -25,9 +25,9 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "https://grantforge-usav-11.vercel.app"
 FRONTEND_THANKS_URL = os.getenv("FRONTEND_THANKS_URL", f"{FRONTEND_URL}/thanks")
 
 # Stripe
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")            # sk_test_... / sk_live_...
-PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")      # pk_test_... / pk_live_...
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "") # whsec_...
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")  # sk_test_... / sk_live_...
+PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")  # pk_test_... / pk_live_...
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")  # whsec_...
 
 APP_MODE = os.getenv("APP_MODE", "production").lower()
 
@@ -89,8 +89,11 @@ def _set_security_headers(resp):
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     resp.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     if request.headers.get("X-Forwarded-Proto", "http") == "https":
-        resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        resp.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
     return resp
+
 
 # ---------------- helpers ----------------
 def cents(x: float) -> int:
@@ -114,7 +117,9 @@ def _norm_words(s: str) -> List[str]:
 
 
 def _tokenize_text(s: str) -> List[str]:
-    return [tok for tok in re.split(r"[^a-zA-Z0-9]+", (s or "").lower()) if len(tok) > 2]
+    return [
+        tok for tok in re.split(r"[^a-zA-Z0-9]+", (s or "").lower()) if len(tok) > 2
+    ]
 
 
 INTAKE_TYPE_MAP = {
@@ -159,14 +164,16 @@ def normalized_keywords(raw_keywords: str) -> List[str]:
 
 def normalized_tags(raw_tags: List[str]) -> List[str]:
     tokens: List[str] = []
-    for t in (raw_tags or []):
+    for t in raw_tags or []:
         n = _normalize_keyword_token(str(t))
         if n and n not in tokens:
             tokens.append(n)
     return tokens
 
 
-def _organization_name(payload: Dict[str, Any], default: str = "Your Organization") -> str:
+def _organization_name(
+    payload: Dict[str, Any], default: str = "Your Organization"
+) -> str:
     return (
         payload.get("organization")
         or payload.get("organization_name")
@@ -200,8 +207,18 @@ def _sanitize_numeric(value: Any, default: float = 0.0) -> float:
 
 def sanitize_payload(data: Dict[str, Any]) -> Dict[str, Any]:
     allowed_text = {
-        "organization", "organization_name", "org", "category", "who", "keywords",
-        "projectTitle", "timeline", "audience", "notes", "need", "session_id"
+        "organization",
+        "organization_name",
+        "org",
+        "category",
+        "who",
+        "keywords",
+        "projectTitle",
+        "timeline",
+        "audience",
+        "notes",
+        "need",
+        "session_id",
     }
     out: Dict[str, Any] = {}
     for k, v in (data or {}).items():
@@ -218,17 +235,23 @@ def sanitize_payload(data: Dict[str, Any]) -> Dict[str, Any]:
                 "deadline": _sanitize_text(v.get("deadline", ""), 100),
                 "program_url": _sanitize_text(v.get("program_url", ""), 500),
                 "official_url": _sanitize_text(v.get("official_url", ""), 500),
-                "opportunity_number": _sanitize_text(v.get("opportunity_number", ""), 120),
+                "opportunity_number": _sanitize_text(
+                    v.get("opportunity_number", ""), 120
+                ),
                 "opp_number": _sanitize_text(v.get("opp_number", ""), 120),
                 "max_amount": _sanitize_numeric(v.get("max_amount", 0), 0.0),
                 "tags": [_sanitize_text(t, 80) for t in (v.get("tags") or [])][:20],
-                "requires_match_percent": int(_sanitize_numeric(v.get("requires_match_percent", 0), 0)),
+                "requires_match_percent": int(
+                    _sanitize_numeric(v.get("requires_match_percent", 0), 0)
+                ),
             }
         elif k == "recommendations" and isinstance(v, list):
             out[k] = [
                 {
                     "title": _sanitize_text((item or {}).get("title", ""), 200),
-                    "program_url": _sanitize_text((item or {}).get("program_url", ""), 500),
+                    "program_url": _sanitize_text(
+                        (item or {}).get("program_url", ""), 500
+                    ),
                 }
                 for item in v[:10]
                 if isinstance(item, dict)
@@ -238,8 +261,6 @@ def sanitize_payload(data: Dict[str, Any]) -> Dict[str, Any]:
         else:
             out[k] = v
     return out
-
-
 
 
 def _validate_required_intake(data: Dict[str, Any]) -> Optional[str]:
@@ -268,12 +289,14 @@ def _validate_required_intake(data: Dict[str, Any]) -> Optional[str]:
         return "Missing required field(s): " + ", ".join(labels[m] for m in missing)
     return None
 
+
 def _csv_safe(value: Any) -> Any:
     if value is None:
         return ""
-    text = str(value)
-    text = text.replace("\r", " ").replace("\n", " ").strip()
-    if text and text[0] in ("=", "+", "-", "@", "\t"):
+    text = str(value).replace("\r", " ").replace("\n", " ").strip()
+    if not text:
+        return ""
+    if not text.startswith("'"):
         return "'" + text
     return text
 
@@ -378,7 +401,9 @@ def _consume_checkout_ref(checkout_ref: str) -> Optional[str]:
         return rec.get("session_id")
 
 
-def _store_draft(session_id: str, draft_body: str, recommendations: List[Dict[str, str]]) -> None:
+def _store_draft(
+    session_id: str, draft_body: str, recommendations: List[Dict[str, str]]
+) -> None:
     with _DRAFT_LOCK:
         _DRAFT_STORE[session_id] = {
             "draft_body": draft_body,
@@ -400,6 +425,13 @@ def _stripe_session_paid(session_id: str) -> Tuple[bool, Optional[Dict[str, Any]
     except Exception as e:
         return False, None, str(e)
 
+
+def _session_belongs_requester(session_obj: Dict[str, Any]) -> bool:
+    metadata = (session_obj or {}).get("metadata") or {}
+    expected_ip = (metadata.get("requester_ip") or "").strip()
+    if not expected_ip:
+        return False
+    return expected_ip == _client_ip()
 
 
 def _deadline_ok(deadline_str: str) -> bool:
@@ -441,52 +473,34 @@ def grants_gov_notice_url(opp_number: str) -> str:
     return f"https://www.grants.gov/search-results-detail/{encoded}"
 
 
-def _safe_grants_url(url: str, title: str, tags: List[str], opp_number: str = "") -> str:
-    """Only allow modern Grants.gov links; otherwise use search fallback."""
-    if isinstance(url, str) and url.startswith(("http://", "https://")) and "grants.gov" in url:
-        lowered = url.lower()
-        if "apply07.grants.gov" in lowered or "grantsws/rest/opportunities/details" in lowered:
-            return fallback_grants_gov_url(title, tags, opp_number)
-        return url
-    return fallback_grants_gov_url(title, tags, opp_number)
+def _safe_grants_url(url: str) -> Optional[str]:
+    """Allow only canonical HTTPS Grants.gov URLs."""
+    if not isinstance(url, str):
+        return None
+    candidate = url.strip()
+    if not candidate.startswith("https://www.grants.gov"):
+        return None
+    lowered = candidate.lower()
+    if (
+        "apply07.grants.gov" in lowered
+        or "grantsws/rest/opportunities/details" in lowered
+    ):
+        return None
+    return candidate
 
 
-# -------- URL normalizer (force Grants.gov or fallback to its search) --------
-def _ensure_http_url(url: str, title: str, tags: List[str], opp_number: str = "") -> str:
-    return _safe_grants_url(url, title or "", tags or [], opp_number)
+# -------- URL normalizer --------
+def _ensure_http_url(url: str) -> Optional[str]:
+    return _safe_grants_url(url)
 
 
 def grant_display_url(gr: Dict[str, Any]) -> str:
-    """
-    Prefer direct Grants.gov opportunity links when possible.
-    Fallback order:
-      1) official_url if valid modern grants.gov URL
-      2) funding_url/program_url if valid modern grants.gov URL
-      3) grants.gov search URL
-    """
-    opp_id = _first_identifier(gr, "opportunity_id", "oppId", "opp_id", "program_id")
-    opp_number = _first_identifier(gr, "opportunity_number", "oppNumber", "opp_number", "funding_opportunity_number")
-    cfda_number = _first_identifier(gr, "cfda", "cfda_number", "assistance_listing", "assistance_listing_number")
-
-    canonical_identifier = opp_number or cfda_number or opp_id
-
-    notice_url = grants_gov_notice_url(canonical_identifier)
-    if notice_url:
-        return notice_url
-
-    official_url = (gr.get("official_url") or "").strip()
-    if official_url:
-        return _ensure_http_url(official_url, gr.get("title", ""), gr.get("tags", []) or [], canonical_identifier)
-
-    raw = gr.get("funding_url") or gr.get("program_url") or ""
-    if raw:
-        return _safe_grants_url(raw, gr.get("title", ""), gr.get("tags", []) or [], canonical_identifier)
-
-    if opp_id or canonical_identifier:
-        q = " ".join([gr.get("title", ""), opp_id, canonical_identifier]).strip()
-        return fallback_grants_gov_url(q, gr.get("tags", []) or [], canonical_identifier)
-
-    return fallback_grants_gov_url(gr.get("title", ""), gr.get("tags", []) or [], canonical_identifier)
+    """Return only a validated official Grants.gov opportunity URL."""
+    for key in ("program_url", "url", "official_url", "funding_url"):
+        candidate = _ensure_http_url(gr.get(key) or "")
+        if candidate:
+            return candidate
+    return ""
 
 
 def _is_session_already_downloaded(session_id: str) -> bool:
@@ -503,7 +517,9 @@ def _pdf_header_mode_note() -> str:
     return "Production"
 
 
-def _wrap_draw_line(c: canvas.Canvas, text: str, start_x: int, y: int, width_chars: int = 110) -> int:
+def _wrap_draw_line(
+    c: canvas.Canvas, text: str, start_x: int, y: int, width_chars: int = 110
+) -> int:
     """
     Draw a long line with naive wrapping; returns new y.
     """
@@ -528,13 +544,21 @@ def fraud_check(category: str, amount: float) -> Dict[str, Any]:
     if c.startswith("teacher"):
         limits.append(("Teachers are limited to $15,000 per draft.", amount <= 15_000))
     elif "school" in c or "district" in c:
-        limits.append(("Schools/Districts are limited to $250,000 per draft.", amount <= 250_000))
+        limits.append(
+            ("Schools/Districts are limited to $250,000 per draft.", amount <= 250_000)
+        )
     elif "church" in c or "faith" in c:
-        limits.append(("Faith orgs are limited to $150,000 per draft.", amount <= 150_000))
+        limits.append(
+            ("Faith orgs are limited to $150,000 per draft.", amount <= 150_000)
+        )
     elif "501" in c or "nonprofit" in c:
-        limits.append(("Nonprofits are limited to $500,000 per draft.", amount <= 500_000))
+        limits.append(
+            ("Nonprofits are limited to $500,000 per draft.", amount <= 500_000)
+        )
     else:
-        limits.append(("Other orgs are limited to $350,000 per draft.", amount <= 350_000))
+        limits.append(
+            ("Other orgs are limited to $350,000 per draft.", amount <= 350_000)
+        )
 
     for msg, ok in limits:
         if not ok:
@@ -546,7 +570,9 @@ def fraud_check(category: str, amount: float) -> Dict[str, Any]:
     return {"ok": True, "msg": ""}
 
 
-def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float) -> Dict[str, Any]:
+def score_grant(
+    gr: Dict[str, Any], category: str, kws: List[str], amount: float
+) -> Dict[str, Any]:
     """
     Compute a score + qualitative fit and human-readable notes.
     Goal: more 'true' shortlisting based on your internal grants.json.
@@ -568,7 +594,9 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
             fit_notes.append(f"Sector aligned: {requested_sector}.")
         else:
             score -= 45
-            fit_notes.append(f"Sector mismatch: client {requested_sector}, program {grant_sector}.")
+            fit_notes.append(
+                f"Sector mismatch: client {requested_sector}, program {grant_sector}."
+            )
 
     # 3) keyword overlap
     tags = normalized_tags(gr.get("tags", []))
@@ -577,11 +605,14 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
     for token in kws:
         keyword_terms.update([w for w in token.split() if len(w) > 2])
     grant_terms = set()
-    for token in (tags + summary_tokens):
+    for token in tags + summary_tokens:
         grant_terms.update([w for w in token.split() if len(w) > 2])
     title_terms = normalized_tags(_tokenize_text(gr.get("title", "")))
     program_terms = normalized_tags(_tokenize_text(gr.get("program", "")))
-    overlap = (set(kws) & (set(tags) | set(summary_tokens) | set(title_terms) | set(program_terms))) | (keyword_terms & grant_terms)
+    overlap = (
+        set(kws)
+        & (set(tags) | set(summary_tokens) | set(title_terms) | set(program_terms))
+    ) | (keyword_terms & grant_terms)
     if overlap:
         score += min(len(overlap), 5) * 8
         fit_notes.append("Keyword overlap: " + ", ".join(sorted(overlap)) + ".")
@@ -611,7 +642,9 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
             utilization_ratio = amount / max_amt
             if 0.4 <= utilization_ratio <= 0.95:
                 score += 6
-                fit_notes.append("Requested funding is well-aligned with the published award range.")
+                fit_notes.append(
+                    "Requested funding is well-aligned with the published award range."
+                )
 
     # deadline
     # 5) deadline validity
@@ -624,9 +657,15 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
     # match % note
     req_match = int(gr.get("requires_match_percent", 0) or 0)
     if req_match > 0:
-        fit_notes.append(f"Requires approximately {req_match}% local match (cash or in-kind).")
+        fit_notes.append(
+            f"Requires approximately {req_match}% local match (cash or in-kind)."
+        )
 
-    fit = "Strong Match" if score >= 130 else "Possible Match" if score >= 95 else "Low Match"
+    fit = (
+        "Strong Match"
+        if score >= 130
+        else "Possible Match" if score >= 95 else "Low Match"
+    )
     if kws and overlap:
         score += min(len(set(overlap)), 4) * 2
     return {"score": score, "fit": fit, "fit_notes": " ".join(fit_notes)}
@@ -635,14 +674,98 @@ def score_grant(gr: Dict[str, Any], category: str, kws: List[str], amount: float
 def infer_client_sector(kws: List[str]) -> str:
     keyword_blob = " ".join(kws)
     sector_rules = [
-        ("telehealth / healthcare", ["telehealth", "health", "healthcare", "patient", "clinic", "elderly", "remote monitoring", "digital health"]),
-        ("workforce development", ["workforce", "apprenticeship", "credential", "certification", "skilled trades", "manufacturing", "upskilling"]),
-        ("education / STEM", ["education", "school", "classroom", "teacher", "stem", "student", "after school"]),
-        ("housing / community development", ["housing", "community development", "revitalization", "homeless", "neighborhood"]),
-        ("public safety / emergency management", ["public safety", "emergency", "flood", "disaster", "mitigation", "response"]),
-        ("conservation / environment", ["conservation", "wetlands", "habitat", "ecosystem", "climate", "restoration", "wildlife"]),
-        ("arts / culture", ["arts", "culture", "storytelling", "creative", "media", "youth empowerment"]),
-        ("entrepreneurship / innovation", ["innovation", "startup", "prototype", "research", "commercialization", "entrepreneurship"]),
+        (
+            "telehealth / healthcare",
+            [
+                "telehealth",
+                "health",
+                "healthcare",
+                "patient",
+                "clinic",
+                "elderly",
+                "remote monitoring",
+                "digital health",
+            ],
+        ),
+        (
+            "workforce development",
+            [
+                "workforce",
+                "apprenticeship",
+                "credential",
+                "certification",
+                "skilled trades",
+                "manufacturing",
+                "upskilling",
+            ],
+        ),
+        (
+            "education / STEM",
+            [
+                "education",
+                "school",
+                "classroom",
+                "teacher",
+                "stem",
+                "student",
+                "after school",
+            ],
+        ),
+        (
+            "housing / community development",
+            [
+                "housing",
+                "community development",
+                "revitalization",
+                "homeless",
+                "neighborhood",
+            ],
+        ),
+        (
+            "public safety / emergency management",
+            [
+                "public safety",
+                "emergency",
+                "flood",
+                "disaster",
+                "mitigation",
+                "response",
+            ],
+        ),
+        (
+            "conservation / environment",
+            [
+                "conservation",
+                "wetlands",
+                "habitat",
+                "ecosystem",
+                "climate",
+                "restoration",
+                "wildlife",
+            ],
+        ),
+        (
+            "arts / culture",
+            [
+                "arts",
+                "culture",
+                "storytelling",
+                "creative",
+                "media",
+                "youth empowerment",
+            ],
+        ),
+        (
+            "entrepreneurship / innovation",
+            [
+                "innovation",
+                "startup",
+                "prototype",
+                "research",
+                "commercialization",
+                "entrepreneurship",
+            ],
+        ),
     ]
     for sector, needles in sector_rules:
         if any(n in keyword_blob for n in needles):
@@ -660,24 +783,75 @@ def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
         return applicant_type == "SMALL_BUSINESS"
     if "cdbg" in haystack:
         return applicant_type == "GOV_LOCAL"
-    if any(k in haystack for k in ["classroom", "school", "district", "titlei", "stem", "robotics", "perkins", "teacher"]):
+    if any(
+        k in haystack
+        for k in [
+            "classroom",
+            "school",
+            "district",
+            "titlei",
+            "stem",
+            "robotics",
+            "perkins",
+            "teacher",
+        ]
+    ):
         return applicant_type == "EDU"
-    if any(k in haystack for k in ["city", "municipality", "public safety", "hazard mitigation", "cdbg", "bric"]):
+    if any(
+        k in haystack
+        for k in [
+            "city",
+            "municipality",
+            "public safety",
+            "hazard mitigation",
+            "cdbg",
+            "bric",
+        ]
+    ):
         return applicant_type == "GOV_LOCAL"
-    if any(k in haystack for k in ["apprenticeship", "manufacturing workforce", "skilled trades"]):
+    if any(
+        k in haystack
+        for k in ["apprenticeship", "manufacturing workforce", "skilled trades"]
+    ):
         return applicant_type in ("SMALL_BUSINESS", "NONPROFIT")
 
-    if applicant_type == "NONPROFIT" and any(k in haystack for k in ["telecom", "telecommunications", "broadband", "fiber"]):
+    if applicant_type == "NONPROFIT" and any(
+        k in haystack for k in ["telecom", "telecommunications", "broadband", "fiber"]
+    ):
         return False
 
     elig = " ".join([str(e).lower() for e in gr.get("eligible_types", [])])
     if applicant_type == "SMALL_BUSINESS":
-        return any(t in elig for t in ["small business", "startup", "for-profit", "smb", "microenterprise"])
+        return any(
+            t in elig
+            for t in [
+                "small business",
+                "startup",
+                "for-profit",
+                "smb",
+                "microenterprise",
+            ]
+        )
     if applicant_type == "GOV_LOCAL":
-        return any(t in elig for t in ["municipality", "city", "county", "local government", "tribal"])
+        return any(
+            t in elig
+            for t in ["municipality", "city", "county", "local government", "tribal"]
+        )
     if applicant_type == "EDU":
-        return any(t in elig for t in ["school", "district", "teacher", "educator", "k12", "classroom"])
-    return any(t in elig for t in ["501", "nonprofit", "community", "community-based organization", "health network"])
+        return any(
+            t in elig
+            for t in ["school", "district", "teacher", "educator", "k12", "classroom"]
+        )
+    return any(
+        t in elig
+        for t in [
+            "501",
+            "nonprofit",
+            "community",
+            "community-based organization",
+            "health network",
+        ]
+    )
 
 
 def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
@@ -709,7 +883,9 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
             if not include_expired and is_expired:
                 continue
 
-            if eligibility_required and not _is_eligible_for_applicant(gr, applicant_type):
+            if eligibility_required and not _is_eligible_for_applicant(
+                gr, applicant_type
+            ):
                 continue
 
             s = score_grant(gr, category, kws, amount)
@@ -717,26 +893,33 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
                 continue
 
             url = grant_display_url(gr)
-            built.append({
-                "title": gr.get("title"),
-                "program": gr.get("program") or gr.get("program_id") or gr.get("program_url") or "unknown",
-                "program_url": url,
-                "program_id": gr.get("program_id", ""),
-                "opp_id": gr.get("opp_id") or gr.get("opportunity_id") or "",
-                "opp_number": gr.get("opp_number") or gr.get("opportunity_number") or "",
-                "official_url": grant_display_url(gr),
-                "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
-                "deadline": close_date or "TBA",
-                "fit": s["fit"],
-                "score": s["score"],
-                "fit_notes": s["fit_notes"],
-                "requires_match_percent": gr.get("requires_match_percent", 0),
-                "max_amount": _safe_float(gr.get("max_amount"), 0),
-                "tags": gr.get("tags", []),
-                "sector": gr.get("sector", ""),
-                "summary": gr.get("summary", ""),
-                "level": "Federal",
-            })
+            built.append(
+                {
+                    "title": gr.get("title"),
+                    "program": gr.get("program")
+                    or gr.get("program_id")
+                    or gr.get("program_url")
+                    or "unknown",
+                    "program_url": url,
+                    "program_id": gr.get("program_id", ""),
+                    "opp_id": gr.get("opp_id") or gr.get("opportunity_id") or "",
+                    "opp_number": gr.get("opp_number")
+                    or gr.get("opportunity_number")
+                    or "",
+                    "official_url": grant_display_url(gr),
+                    "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
+                    "deadline": close_date or "TBA",
+                    "fit": s["fit"],
+                    "score": s["score"],
+                    "fit_notes": s["fit_notes"],
+                    "requires_match_percent": gr.get("requires_match_percent", 0),
+                    "max_amount": _safe_float(gr.get("max_amount"), 0),
+                    "tags": gr.get("tags", []),
+                    "sector": gr.get("sector", ""),
+                    "summary": gr.get("summary", ""),
+                    "level": "Federal",
+                }
+            )
         return built
 
     rows = build_rows(eligibility_required=True)
@@ -751,30 +934,45 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
                 continue
             s = score_grant(gr, category, kws, amount)
             url = grant_display_url(gr)
-            rows.append({
-                "title": gr.get("title"),
-                "program": gr.get("program") or gr.get("program_id") or gr.get("program_url") or "unknown",
-                "program_url": url,
-                "program_id": gr.get("program_id", ""),
-                "opp_id": gr.get("opp_id") or gr.get("opportunity_id") or "",
-                "opp_number": gr.get("opp_number") or gr.get("opportunity_number") or "",
-                "official_url": url,
-                "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
-                "deadline": close_date or "TBA",
-                "fit": s["fit"],
-                "score": s["score"],
-                "fit_notes": s["fit_notes"],
-                "requires_match_percent": gr.get("requires_match_percent", 0),
-                "max_amount": _safe_float(gr.get("max_amount"), 0),
-                "tags": gr.get("tags", []),
-                "sector": gr.get("sector", ""),
-                "summary": gr.get("summary", ""),
-                "level": "Federal",
-            })
+            rows.append(
+                {
+                    "title": gr.get("title"),
+                    "program": gr.get("program")
+                    or gr.get("program_id")
+                    or gr.get("program_url")
+                    or "unknown",
+                    "program_url": url,
+                    "program_id": gr.get("program_id", ""),
+                    "opp_id": gr.get("opp_id") or gr.get("opportunity_id") or "",
+                    "opp_number": gr.get("opp_number")
+                    or gr.get("opportunity_number")
+                    or "",
+                    "official_url": url,
+                    "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
+                    "deadline": close_date or "TBA",
+                    "fit": s["fit"],
+                    "score": s["score"],
+                    "fit_notes": s["fit_notes"],
+                    "requires_match_percent": gr.get("requires_match_percent", 0),
+                    "max_amount": _safe_float(gr.get("max_amount"), 0),
+                    "tags": gr.get("tags", []),
+                    "sector": gr.get("sector", ""),
+                    "summary": gr.get("summary", ""),
+                    "level": "Federal",
+                }
+            )
 
-    rows.sort(key=lambda r: (_safe_float(r.get("score"), 0), _safe_float(r.get("max_amount"), 0)), reverse=True)
+    rows.sort(
+        key=lambda r: (
+            _safe_float(r.get("score"), 0),
+            _safe_float(r.get("max_amount"), 0),
+        ),
+        reverse=True,
+    )
 
-    strong_rows = [r for r in rows if r.get("fit") in ("Strong Match", "Possible Match")]
+    strong_rows = [
+        r for r in rows if r.get("fit") in ("Strong Match", "Possible Match")
+    ]
     has_strong_matches = len(strong_rows) > 0
     if len(strong_rows) >= 3:
         federal_rows = strong_rows[:3]
@@ -858,17 +1056,35 @@ def _mk_objectives_from_keywords(kws: List[str], audience: str) -> List[str]:
             "specialeducation": "Special Education",
         }.get(k, k)
         if k in ("stem", "robotics", "technology", "tech"):
-            out.append(f"Purchase starter robotics/tech kits and integrate weekly {k.upper()} labs for {audience or 'participants'}.")
+            out.append(
+                f"Purchase starter robotics/tech kits and integrate weekly {k.upper()} labs for {audience or 'participants'}."
+            )
         elif k in ("equipment", "supplies"):
-            out.append("Acquire durable classroom equipment and consumable supplies required to deliver activities.")
-        elif k in ("training", "workshop", "professional", "professional development", "pd"):
-            out.append("Provide teacher/staff PD workshops to ensure safe, effective program delivery.")
+            out.append(
+                "Acquire durable classroom equipment and consumable supplies required to deliver activities."
+            )
+        elif k in (
+            "training",
+            "workshop",
+            "professional",
+            "professional development",
+            "pd",
+        ):
+            out.append(
+                "Provide teacher/staff PD workshops to ensure safe, effective program delivery."
+            )
         elif k in ("after-school", "afterschool", "tutoring"):
-            out.append("Launch a structured after-school tutoring/enrichment block with pre/post skill checks.")
+            out.append(
+                "Launch a structured after-school tutoring/enrichment block with pre/post skill checks."
+            )
         elif k in ("cte", "workforce"):
-            out.append("Align activities to CTE/workforce competencies with employer input and mock assessments.")
+            out.append(
+                "Align activities to CTE/workforce competencies with employer input and mock assessments."
+            )
         else:
-            out.append(f"Implement targeted activities related to “{display_k}” with measurable outputs.")
+            out.append(
+                f"Implement targeted activities related to “{display_k}” with measurable outputs."
+            )
     return out
 
 
@@ -888,7 +1104,7 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     intake.pop("eligible_state", None)
 
     org = _organization_name(intake)
-    proj_title = (intake.get("projectTitle") or "Proposed initiative").strip()
+    proj_title = (intake.get("projectTitle") or "Strategic initiative").strip()
     category = (intake.get("category") or intake.get("who") or "organization").strip()
     audience = (intake.get("audience") or "participants").strip().rstrip(".")
     timeline = (intake.get("timeline") or "12 months").strip().rstrip(".")
@@ -897,69 +1113,90 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
 
     amount = _safe_float(intake.get("amountRequested"))
     annual_budget = _safe_float(intake.get("annualBudget"), 0)
-    keywords_str = (intake.get("keywords") or "").strip()
-    kws = normalized_keywords(keywords_str)
+    kws = normalized_keywords((intake.get("keywords") or "").strip())
     client_sector = infer_client_sector(kws) or "community impact"
 
-    g_title = grant.get("title") or "Selected federal opportunity"
+    g_title = grant.get("title") or "federal funding opportunity"
     g_deadline = grant.get("deadline") or "TBA"
     g_match = int(grant.get("requires_match_percent", 0) or 0)
     g_max = _safe_float(grant.get("max_amount"), 0)
     g_url = grant_display_url(grant) if grant else ""
 
-    req_str = f"${amount:,.0f}" if amount > 0 else "a competitive request amount"
+    req_str = (
+        f"${amount:,.0f}" if amount > 0 else "an amount aligned with program priorities"
+    )
     aligned_request = min(amount, g_max) if (amount > 0 and g_max > 0) else amount
     aligned_req_str = f"${aligned_request:,.0f}" if aligned_request > 0 else req_str
 
-    need_context = stated_need or notes or (
-        "The project addresses access barriers, service coordination gaps, and uneven resource distribution that limit outcomes for the intended population."
+    need_context = (
+        stated_need
+        or notes
+        or (
+            f"{org} has identified documented barriers affecting {audience}, including uneven access to high-quality services and limited capacity to sustain measurable outcomes."
+        )
     )
     budget_context = (
-        f"The organization currently operates with an estimated annual budget of ${annual_budget:,.0f}, supporting compliant grants management, monitoring, and audit-ready documentation."
-        if annual_budget > 0 else
-        "The organization maintains financial controls, procurement standards, and leadership oversight consistent with federal grant administration requirements."
+        f"The organization currently operates with an estimated annual budget of ${annual_budget:,.0f}, demonstrating established fiscal controls, procurement discipline, and compliant grants management practices."
+        if annual_budget > 0
+        else "The organization maintains financial controls, procurement standards, and leadership oversight consistent with federal grant administration requirements."
     )
 
     objectives = _mk_objectives_from_keywords(kws, audience)
     if not objectives:
         objectives = [
-            "Deliver high-quality services through a structured program model tied to measurable milestones.",
-            "Increase participation and retention among the intended audience across the implementation period.",
-            "Demonstrate measurable outcomes using consistent performance monitoring and continuous improvement.",
+            f"Deliver {proj_title} through a structured model with clear milestones and accountability for {audience}.",
+            "Increase participation and retention across the implementation period through coordinated service delivery.",
+            "Demonstrate measurable performance gains through routine monitoring, data review, and corrective action protocols.",
         ]
 
-    match_clause = f" A documented strategy will satisfy the required {g_match}% match through eligible cash and in-kind contributions." if g_match > 0 else ""
+    match_clause = (
+        f" A documented strategy will satisfy the required {g_match}% match through eligible cash and in-kind contributions."
+        if g_match > 0
+        else ""
+    )
     ceiling_clause = (
-        f" Because the requested amount exceeds the published ceiling, this draft aligns budget assumptions to approximately {aligned_req_str} while preserving core outcomes through phased implementation."
-        if g_max > 0 and amount > g_max else ""
+        f" Because the requested amount exceeds the published ceiling, this narrative aligns budget assumptions to approximately {aligned_req_str} while preserving core outcomes through phased implementation."
+        if g_max > 0 and amount > g_max
+        else ""
     )
 
     sections = [
         (
-            "Overview\n"
-            f"{org} respectfully submits this narrative in response to the {g_title} opportunity to advance '{proj_title}' for {audience}. "
-            f"As a {category}, the organization requests {req_str} to execute a disciplined, outcomes-focused initiative in the {client_sector} sector across {timeline}. "
-            "The proposal presents a credible plan, clear governance, and measurable public benefit, positioning the project for strong implementation and responsible stewardship of federal resources."
+            "Introduction\n"
+            f"{org} respectfully submits this proposal narrative for the {g_title} opportunity in support of '{proj_title}'. "
+            f"As a {category}, the organization proposes a disciplined, outcomes-focused initiative for {audience} in the {client_sector} domain over {timeline}. "
+            "Moreover, the proposal presents a credible implementation framework, strong governance, and measurable public benefit."
+        ),
+        (
+            "Problem Statement\n"
+            f"The request is grounded in documented need: {need_context} "
+            "Consequently, federal investment is necessary to close service gaps, strengthen delivery capacity, and advance equitable access to results-oriented programming."
         ),
         (
             "Objectives\n"
-            f"The funding request is grounded in documented need: {need_context} "
-            "Accordingly, the project will pursue the following objectives with clear accountability and performance tracking: "
-            + " ".join([f"({i+1}) {obj}" for i, obj in enumerate(objectives[:4])]) + ". "
-            "Each objective is designed to produce measurable improvements, strengthen service consistency, and align activities to grant priorities."
+            + " ".join([f"({i+1}) {obj}" for i, obj in enumerate(objectives[:4])])
+            + " Therefore, these objectives establish measurable priorities for delivery, accountability, and performance oversight throughout the project period."
         ),
         (
-            "Implementation Plan\n"
-            f"Implementation will proceed through phased milestones over {timeline}, beginning with launch readiness and baseline assessment, followed by full service deployment and continuous quality improvement cycles. "
-            "Leadership will maintain monthly progress reviews, risk controls, procurement compliance, and documentation standards to ensure delivery fidelity. "
-            f"{budget_context} Requested funds will be allocated to allowable, impact-oriented cost categories with monthly reconciliation and variance oversight.{ceiling_clause}{match_clause}"
+            "Program Design\n"
+            f"Implementation will proceed through phased milestones across {timeline}, beginning with launch readiness and baseline assessment, followed by full service delivery and continuous quality improvement cycles. "
+            "In addition, leadership will maintain monthly progress reviews, risk controls, procurement compliance, and documentation standards to ensure execution fidelity."
         ),
         (
-            "Impact\n"
-            f"The primary beneficiaries are {audience}. Expected impact includes improved access, stronger participation persistence, and measurable gains in core outcome indicators. "
-            "Beyond the grant period, the organization will sustain progress through workflow standardization, staff capability development, and coordinated partner commitments. "
+            "Budget\n"
+            f"The proposed request of {req_str} is structured to align with allowable federal cost categories and implementation milestones. {budget_context}"
+            f"{ceiling_clause}{match_clause} Furthermore, quarterly budget reviews and variance monitoring will support compliance, transparency, and audit readiness."
+        ),
+        (
+            "Conclusion\n"
+            f"In conclusion, {org} is prepared to implement '{proj_title}' for {audience} with qualified leadership, disciplined oversight, and measurable outcomes. "
+            "Accordingly, the organization will sustain implementation quality through continuous monitoring, partner coordination, and executive governance. "
             f"Prior to submission, leadership will re-validate all requirements and deadlines for {g_title} (deadline: {g_deadline})."
-            + (" The official Grants.gov notice link is included in the order details section." if g_url else "")
+            + (
+                " The official Grants.gov opportunity URL is provided in the order details section."
+                if g_url
+                else ""
+            )
             + " Final executive review and authorization will be completed before filing."
         ),
     ]
@@ -983,14 +1220,12 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
     c = canvas.Canvas(pdf_path, pagesize=letter)
 
     left_margin = 54
-    right_margin = 558
     top_y = 770
     body_top_y = 720
     bottom_margin = 60
     line_width_chars = 98
 
     created_at = _now_utc()
-    page_num = 1
 
     def draw_header() -> int:
         c.setFont("Helvetica-Bold", 14)
@@ -1007,13 +1242,10 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
             bottom_margin - 12,
             "Review and edit all draft materials before submission. All sales final. No refunds.",
         )
-        c.drawRightString(right_margin, bottom_margin - 12, f"Page {page_num}")
 
     def new_page() -> int:
-        nonlocal page_num
         draw_footer()
         c.showPage()
-        page_num += 1
         return draw_header()
 
     y = draw_header()
@@ -1033,13 +1265,15 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
         c.setFillColorRGB(0.0, 0.2, 0.8)
         c.drawString(left_margin, y, display)
         text_width = c.stringWidth(display, "Helvetica", 10)
-        c.linkURL(url, (left_margin, y - 2, left_margin + text_width, y + 10), relative=0)
+        c.linkURL(
+            url, (left_margin, y - 2, left_margin + text_width, y + 10), relative=0
+        )
         c.setFillColorRGB(0, 0, 0)
         return y - 14
 
     draft_body = payload.get("draft_body")
     if isinstance(draft_body, str) and draft_body.strip():
-        y = draw_section_header("Draft Narrative")
+        y = draw_section_header("Grant Narrative")
 
         for para in draft_body.split("\n\n"):
             for line in para.split("\n"):
@@ -1047,10 +1281,14 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
                     y = new_page()
                 if line.strip().endswith(":"):
                     c.setFont("Helvetica-Bold", 10)
-                    y = _wrap_draw_line(c, line.strip(), left_margin, y, width_chars=line_width_chars)
+                    y = _wrap_draw_line(
+                        c, line.strip(), left_margin, y, width_chars=line_width_chars
+                    )
                     c.setFont("Helvetica", 10)
                 else:
-                    y = _wrap_draw_line(c, line, left_margin, y, width_chars=line_width_chars)
+                    y = _wrap_draw_line(
+                        c, line, left_margin, y, width_chars=line_width_chars
+                    )
             y -= 8
 
         if y < bottom_margin + 20:
@@ -1071,15 +1309,21 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
 
         grant_url = (payload.get("grant_url") or "").strip()
         if grant_url:
-            y = draw_hyperlink("Official opportunity URL: View official Grants.gov opportunity", grant_url)
+            y = draw_hyperlink(f"Official opportunity URL: {grant_url}", grant_url)
 
-        recommendations = payload.get("recommendations") if isinstance(payload.get("recommendations"), list) else []
+        recommendations = (
+            payload.get("recommendations")
+            if isinstance(payload.get("recommendations"), list)
+            else []
+        )
         if recommendations:
             if y < bottom_margin:
                 y = new_page()
             y = draw_section_header("Recommended grant opportunities")
             for rec in recommendations:
-                title = _sanitize_text((rec or {}).get("title", "Untitled opportunity"), 180)
+                title = _sanitize_text(
+                    (rec or {}).get("title", "Untitled opportunity"), 180
+                )
                 rec_url = _sanitize_text((rec or {}).get("program_url", ""), 500)
                 if not rec_url:
                     continue
@@ -1087,21 +1331,8 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
                     y = new_page()
                 y = draw_hyperlink(title, rec_url)
 
-        for k in sorted(payload.keys()):
-            if k == "draft_body":
-                continue
-            if k in ("grant_url", "app_mode", "payment_status", "recommendations"):
-                continue
-            v = payload[k]
-            if y < bottom_margin:
-                y = new_page()
-            y = draw_line(f"{k}: {v}")
     else:
-        for k in sorted(payload.keys()):
-            v = payload[k]
-            if y < bottom_margin:
-                y = new_page()
-            y = draw_line(f"{k}: {v}")
+        y = draw_line("Grant narrative content was not available for this order.")
 
     draw_footer()
     c.save()
@@ -1114,7 +1345,10 @@ def _apply_rate_limit():
         return None
     route = request.path
     if route in RATE_LIMITS and _rate_limit_exceeded(route):
-        return jsonify(ok=False, error="Rate limit exceeded. Please try again shortly."), 429
+        return (
+            jsonify(ok=False, error="Rate limit exceeded. Please try again shortly."),
+            429,
+        )
     return None
 
 
@@ -1131,7 +1365,7 @@ def get_health():
         mode=APP_MODE,
         publishableKey=bool(PUBLISHABLE_KEY),
         frontendThanksUrl=FRONTEND_THANKS_URL,
-        ts=_now_utc()
+        ts=_now_utc(),
     )
 
 
@@ -1149,10 +1383,13 @@ def get_offline():
 @app.get("/get/debug-paths")
 def get_debug_paths():
     debug_token = os.getenv("DEBUG_AUTH_TOKEN", "")
-    if APP_MODE != "development" or not DEBUG_ENDPOINTS_ENABLED:
-        return jsonify(ok=False, error="Not found"), 404
     provided = request.headers.get("X-Debug-Auth", "")
-    if not debug_token or provided != debug_token:
+    is_operator = (
+        DEBUG_ENDPOINTS_ENABLED
+        and bool(debug_token)
+        and secrets.compare_digest(provided, debug_token)
+    )
+    if not is_operator:
         return jsonify(ok=False, error="Unauthorized"), 401
     return jsonify(ok=True, ts=_now_utc(), message="Debug endpoints enabled")
 
@@ -1236,10 +1473,13 @@ def create_checkout_session():
 
     max_amt = _safe_float(grant.get("max_amount"), 0)
     if max_amt and amount_req > max_amt:
-        return jsonify(
-            ok=False,
-            error=f"Requested ${amount_req:,.0f} exceeds this program’s maximum (${max_amt:,.0f})."
-        ), 400
+        return (
+            jsonify(
+                ok=False,
+                error=f"Requested ${amount_req:,.0f} exceeds this program’s maximum (${max_amt:,.0f}).",
+            ),
+            400,
+        )
 
     price = price_for(category, annual_budget)
     product_name = f"Grant Draft — {category}"
@@ -1248,7 +1488,11 @@ def create_checkout_session():
 
     draft_body = build_narrative(data, grant)
     grant_url = grant_display_url(grant) if grant else ""
-    recommendations = data.get("recommendations") if isinstance(data.get("recommendations"), list) else []
+    recommendations = (
+        data.get("recommendations")
+        if isinstance(data.get("recommendations"), list)
+        else []
+    )
 
     metadata = {
         "order_id": order_id,
@@ -1266,6 +1510,7 @@ def create_checkout_session():
         "keywords": (data.get("keywords") or "").strip(),
         "price": f"{price:.2f}",
         "refund_policy": "All sales final. No refunds.",
+        "requester_ip": _client_ip(),
     }
 
     checkout_ref = secrets.token_urlsafe(18)
@@ -1273,15 +1518,16 @@ def create_checkout_session():
         session = stripe.checkout.Session.create(
             mode="payment",
             payment_method_types=["card"],
-            phone_number_collection={"enabled": False},
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": product_name},
-                    "unit_amount": cents(price),
-                },
-                "quantity": 1,
-            }],
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {"name": product_name},
+                        "unit_amount": cents(price),
+                    },
+                    "quantity": 1,
+                }
+            ],
             success_url=f"{FRONTEND_THANKS_URL}?ref={checkout_ref}",
             cancel_url=f"{FRONTEND_URL}",
             metadata=metadata,
@@ -1309,7 +1555,12 @@ def create_checkout_session():
     }
     _append_payment_log_row(row)
 
-    return jsonify(ok=True, url=session.url, checkoutReference=checkout_ref, publishableKey=PUBLISHABLE_KEY)
+    return jsonify(
+        ok=True,
+        url=session.url,
+        checkoutReference=checkout_ref,
+        publishableKey=PUBLISHABLE_KEY,
+    )
 
 
 # ---------------- Stripe Webhook (reliable post-payment) ----------------
@@ -1321,7 +1572,9 @@ def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get("Stripe-Signature", "")
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
     except Exception as e:
         return jsonify(ok=False, error=f"Signature verification failed: {e}"), 400
 
@@ -1331,24 +1584,34 @@ def stripe_webhook():
         md = session_obj.get("metadata") or {}
 
         row = find_log_by_session(session_id)
-        order_id = (row.get("order_id") if row else None) or md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
+        order_id = (
+            (row.get("order_id") if row else None)
+            or md.get("order_id")
+            or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
+        )
         draft_payload = _load_draft(session_id)
         payload_for_pdf = dict(md)
-        payload_for_pdf.update({
-            "payment_status": session_obj.get("payment_status"),
-            "amount_total": session_obj.get("amount_total"),
-            "currency": session_obj.get("currency"),
-            "mode": session_obj.get("mode"),
-            "draft_body": draft_payload.get("draft_body", ""),
-            "recommendations": draft_payload.get("recommendations", []),
-        })
+        payload_for_pdf.update(
+            {
+                "payment_status": session_obj.get("payment_status"),
+                "amount_total": session_obj.get("amount_total"),
+                "currency": session_obj.get("currency"),
+                "mode": session_obj.get("mode"),
+                "draft_body": draft_payload.get("draft_body", ""),
+                "recommendations": draft_payload.get("recommendations", []),
+            }
+        )
         try:
             pdf_path = make_pdf(order_id, payload_for_pdf)
-            _update_payment_log_by("session_id", session_id, {
-                "pdf_path": pdf_path,
-                "paid": True,
-                "payment_status": "paid",
-            })
+            _update_payment_log_by(
+                "session_id",
+                session_id,
+                {
+                    "pdf_path": pdf_path,
+                    "paid": True,
+                    "payment_status": "paid",
+                },
+            )
         except Exception:
             pass
 
@@ -1368,16 +1631,23 @@ def create_download_token():
         return jsonify(ok=False, error="invalid or expired checkout reference"), 400
 
     if _is_session_already_downloaded(session_id):
-        return jsonify(ok=False, error="download already completed for this session"), 409
+        return (
+            jsonify(ok=False, error="download already completed for this session"),
+            409,
+        )
 
     paid, _s, err = _stripe_session_paid(session_id)
     if err:
         return jsonify(ok=False, error=f"Stripe lookup failed: {err}"), 400
     if not paid:
         return jsonify(ok=False, error="payment not completed"), 402
+    if not _session_belongs_requester(_s or {}):
+        return jsonify(ok=False, error="session does not belong to requester"), 403
 
     token = _mint_download_token(session_id)
-    _update_payment_log_by("session_id", session_id, {"paid": True, "payment_status": "paid"})
+    _update_payment_log_by(
+        "session_id", session_id, {"paid": True, "payment_status": "paid"}
+    )
     return jsonify(ok=True, token=token, expires_in=TOKEN_TTL_SECONDS)
 
 
@@ -1396,6 +1666,8 @@ def receipt():
         return jsonify(ok=False, error=f"Stripe lookup failed: {err}"), 400
     if not paid:
         return jsonify(ok=False, error="payment not completed"), 402
+    if not _session_belongs_requester(s or {}):
+        return jsonify(ok=False, error="session does not belong to requester"), 403
 
     if _is_session_already_downloaded(session_id):
         return jsonify(ok=False, error="download already completed for this order"), 409
@@ -1403,33 +1675,39 @@ def receipt():
     row = find_log_by_session(session_id)
     if not row:
         md = s.metadata or {}
-        order_id = md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
-        _append_payment_log_row({
-            "ts_utc": _now_utc(),
-            "order_id": order_id,
-            "org": md.get("org", ""),
-            "category": md.get("category", ""),
-            "amountRequested": float(md.get("amountRequested", 0) or 0),
-            "annualBudget": float(md.get("annualBudget", 0) or 0),
-            "grant_title": md.get("grant_title", ""),
-            "grant_program": md.get("grant_program", ""),
-            "session_id": session_id,
-            "session_url": "",
-            "price": float(md.get("price", FLAT_PRICE) or FLAT_PRICE),
-            "pdf_path": "",
-            "paid": True,
-        })
+        order_id = md.get("order_id") or datetime.utcnow().strftime(
+            "ORD-%Y%m%d-%H%M%S-%f"
+        )
+        _append_payment_log_row(
+            {
+                "ts_utc": _now_utc(),
+                "order_id": order_id,
+                "org": md.get("org", ""),
+                "category": md.get("category", ""),
+                "amountRequested": float(md.get("amountRequested", 0) or 0),
+                "annualBudget": float(md.get("annualBudget", 0) or 0),
+                "grant_title": md.get("grant_title", ""),
+                "grant_program": md.get("grant_program", ""),
+                "session_id": session_id,
+                "session_url": "",
+                "price": float(md.get("price", FLAT_PRICE) or FLAT_PRICE),
+                "pdf_path": "",
+                "paid": True,
+            }
+        )
         row = find_log_by_session(session_id)
 
-    return jsonify({
-        "ok": True,
-        "order_id": row.get("order_id", ""),
-        "amount_total": row.get("price", FLAT_PRICE),
-        "paid": True,
-        "grant_title": row.get("grant_title", ""),
-        "download_path": f"/download-by-session?token={token}",
-        "ts": _now_utc(),
-    })
+    return jsonify(
+        {
+            "ok": True,
+            "order_id": row.get("order_id", ""),
+            "amount_total": row.get("price", FLAT_PRICE),
+            "paid": True,
+            "grant_title": row.get("grant_title", ""),
+            "download_path": f"/download-by-session?token={token}",
+            "ts": _now_utc(),
+        }
+    )
 
 
 @app.get("/download-by-session")
@@ -1441,20 +1719,32 @@ def download_by_session():
 
         session_id = _consume_token(token)
         if not session_id:
-            return jsonify(ok=False, error="invalid, expired, or already-used token"), 400
+            return (
+                jsonify(ok=False, error="invalid, expired, or already-used token"),
+                400,
+            )
 
         if _is_session_already_downloaded(session_id):
-            return jsonify(ok=False, error="download already completed for this order"), 409
+            return (
+                jsonify(ok=False, error="download already completed for this order"),
+                409,
+            )
 
         paid, s, err = _stripe_session_paid(session_id)
         if err:
             return jsonify(ok=False, error=f"Stripe lookup failed: {err}"), 400
         if not paid:
             return jsonify(ok=False, error="payment not completed"), 402
+        if not _session_belongs_requester(s or {}):
+            return jsonify(ok=False, error="session does not belong to requester"), 403
 
         row = find_log_by_session(session_id)
         md = (s.metadata or {}) if s else {}
-        order_id = (row.get("order_id") if row else None) or md.get("order_id") or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
+        order_id = (
+            (row.get("order_id") if row else None)
+            or md.get("order_id")
+            or datetime.utcnow().strftime("ORD-%Y%m%d-%H%M%S-%f")
+        )
 
         pdf_path = row.get("pdf_path") if row else ""
         if not isinstance(pdf_path, str):
@@ -1465,19 +1755,28 @@ def download_by_session():
             pdf_payload["draft_body"] = draft_payload.get("draft_body", "")
             pdf_payload["recommendations"] = draft_payload.get("recommendations", [])
             pdf_path = make_pdf(order_id, pdf_payload)
-            _update_payment_log_by("session_id", session_id, {
-                "order_id": order_id,
-                "pdf_path": pdf_path,
-                "paid": True,
-                "payment_status": "paid",
-            })
+            _update_payment_log_by(
+                "session_id",
+                session_id,
+                {
+                    "order_id": order_id,
+                    "pdf_path": pdf_path,
+                    "paid": True,
+                    "payment_status": "paid",
+                },
+            )
 
         if not (pdf_path and os.path.exists(pdf_path)):
-            return jsonify(ok=False, error="PDF not found yet; try again in a moment."), 404
+            return (
+                jsonify(ok=False, error="PDF not found yet; try again in a moment."),
+                404,
+            )
 
         _mark_session_downloaded(session_id)
         name = os.path.basename(pdf_path) or f"{order_id}.pdf"
-        return send_file(pdf_path, as_attachment=True, download_name=name, mimetype="application/pdf")
+        return send_file(
+            pdf_path, as_attachment=True, download_name=name, mimetype="application/pdf"
+        )
     except Exception as e:
         return jsonify(ok=False, error=f"download route error: {e}"), 400
 
