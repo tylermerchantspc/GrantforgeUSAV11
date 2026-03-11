@@ -11,20 +11,12 @@ import {
 import "./App.css";
 
 /* -------- Safe Grants.gov direct opportunity URL helper -------- */
-function safeProgramUrl(u, title, tags = [], row = {}) {
-  const oppNumber = (row.opportunity_number || row.opp_number || row.oppNumber || row.funding_opportunity_number || "").trim();
-  const cfda = (row.cfda || row.cfda_number || row.assistance_listing_number || "").trim();
-  const identifier = oppNumber || cfda;
-  if (identifier) {
-    return `https://www.grants.gov/search-results-detail/${encodeURIComponent(identifier)}`;
-  }
-
-  const official = row.official_url || row.program_url || u || "";
-  if (typeof official === "string" && official.startsWith("http") && official.includes("grants.gov") && !official.includes("apply07.grants.gov") && !official.includes("grantsws/rest/opportunities/details")) {
+function safeProgramUrl(u, _title, row = {}) {
+  const official = row.program_url || row.url || row.official_url || u || "";
+  if (typeof official === "string" && official.startsWith("https://www.grants.gov")) {
     return official;
   }
-  const q = encodeURIComponent([identifier, title, ...(tags || [])].filter(Boolean).join(" ") || "federal grants");
-  return `https://www.grants.gov/search-grants?keywords=${q}`;
+  return null;
 }
 
 /* -------- Success Screen -------- */
@@ -198,7 +190,7 @@ function IntakeApp() {
         grant: row,
         recommendations: federalResults.map((r) => ({
           title: r.title,
-          program_url: safeProgramUrl(r.program_url, r.title, r.tags, r),
+          program_url: safeProgramUrl(r.program_url, r.title, r),
         })),
       };
       const data = await createCheckoutSession(body);
@@ -360,17 +352,11 @@ function IntakeApp() {
                     </div>
 
                     {(() => {
-                      const directUrl = safeProgramUrl(row.program_url, row.title, row.tags, row);
+                      const directUrl = safeProgramUrl(row.program_url, row.title, row);
                       if (!directUrl) return null;
                       return (
                         <div className="muted" style={{ marginTop: 4 }}>
-                          <a
-                            href={directUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            View official notice on Grants.gov
-                          </a>
+                          <a href={directUrl} target="_blank" rel="noopener noreferrer">Official Grants.gov opportunity</a>
                         </div>
                       );
                     })()}
