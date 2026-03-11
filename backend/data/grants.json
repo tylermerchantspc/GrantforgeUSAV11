@@ -1,132 +1,265 @@
 [
   {
     "title": "HRSA Rural Health Care Services Outreach Program",
-    "official_url": "https://www.grants.gov/search-grants?keywords=HRSA%20Rural%20Health%20Care%20Services%20Outreach%20Program",
+    "official_url": "https://www.grants.gov/search-results-detail/HRSA-25-122",
     "opportunity_number": "HRSA-25-122",
     "deadline": "2027-03-15",
     "close_date": "2027-03-15",
     "min_amount": 100000,
     "max_amount": 500000,
-    "eligible_types": ["501c3 nonprofit", "nonprofit", "rural health network", "community health organization"],
-    "tags": ["rural health", "telehealth", "care coordination", "chronic disease", "elderly care"],
+    "eligible_types": [
+      "501c3 nonprofit",
+      "nonprofit",
+      "rural health network",
+      "community health organization"
+    ],
+    "tags": [
+      "rural health",
+      "telehealth",
+      "care coordination",
+      "chronic disease",
+      "elderly care"
+    ],
     "sector": "telehealth / healthcare",
-    "summary": "Supports rural providers and nonprofit health networks delivering expanded access to care, including telehealth-enabled services for underserved populations."
+    "summary": "Supports rural providers and nonprofit health networks delivering expanded access to care, including telehealth-enabled services for underserved populations.",
+    "url": "https://www.grants.gov/search-results-detail/HRSA-25-122",
+    "program_url": "https://www.grants.gov/search-results-detail/HRSA-25-122"
   },
   {
     "title": "USDA Distance Learning and Telemedicine Grant Program",
-    "official_url": "https://www.grants.gov/search-grants?keywords=USDA%20Distance%20Learning%20and%20Telemedicine%20Grant%20Program",
+    "official_url": "https://www.grants.gov/search-results-detail/RUS-25-01-DLT",
     "opportunity_number": "RUS-25-01-DLT",
     "deadline": "2027-04-30",
     "close_date": "2027-04-30",
     "min_amount": 50000,
     "max_amount": 1000000,
-    "eligible_types": ["nonprofit", "school", "hospital", "tribal", "local government", "consortium"],
-    "tags": ["telehealth", "remote patient monitoring", "rural healthcare", "digital access", "broadband-enabled care"],
+    "eligible_types": [
+      "nonprofit",
+      "school",
+      "hospital",
+      "tribal",
+      "local government",
+      "consortium"
+    ],
+    "tags": [
+      "telehealth",
+      "remote patient monitoring",
+      "rural healthcare",
+      "digital access",
+      "broadband-enabled care"
+    ],
     "sector": "telehealth / healthcare",
-    "summary": "Funds equipment and technology that expand rural telemedicine and distance services, including clinical access points and remote care infrastructure."
+    "summary": "Funds equipment and technology that expand rural telemedicine and distance services, including clinical access points and remote care infrastructure.",
+    "url": "https://www.grants.gov/search-results-detail/RUS-25-01-DLT",
+    "program_url": "https://www.grants.gov/search-results-detail/RUS-25-01-DLT"
   },
   {
     "title": "Appalachian Regional Commission INSPIRE Initiative",
-    "official_url": "https://www.grants.gov/search-grants?keywords=Appalachian%20Regional%20Commission%20INSPIRE%20Initiative",
+    "official_url": "https://www.grants.gov/search-results-detail/ARC-INSPIRE-2027",
     "opportunity_number": "ARC-INSPIRE-2027",
     "deadline": "2027-05-10",
     "close_date": "2027-05-10",
     "min_amount": 100000,
     "max_amount": 2000000,
-    "eligible_types": ["nonprofit", "local government", "higher education", "economic development organization"],
-    "tags": ["health workforce", "substance use recovery", "community health", "workforce pathways"],
+    "eligible_types": [
+      "nonprofit",
+      "local government",
+      "higher education",
+      "economic development organization"
+    ],
+    "tags": [
+      "health workforce",
+      "substance use recovery",
+      "community health",
+      "workforce pathways"
+    ],
     "sector": "workforce development",
-    "summary": "Supports regional projects improving health outcomes and workforce participation in distressed communities, with emphasis on long-term economic resilience."
+    "summary": "Supports regional projects improving health outcomes and workforce participation in distressed communities, with emphasis on long-term economic resilience.",
+    "url": "https://www.grants.gov/search-results-detail/ARC-INSPIRE-2027",
+    "program_url": "https://www.grants.gov/search-results-detail/ARC-INSPIRE-2027"
   },
   {
     "title": "DOL Apprenticeship Building America Grant Program",
-    "official_url": "https://www.grants.gov/search-grants?keywords=DOL%20Apprenticeship%20Building%20America%20Grant%20Program",
+    "official_url": "https://www.grants.gov/search-results-detail/FOA-ETA-27-ABA",
     "opportunity_number": "FOA-ETA-27-ABA",
     "deadline": "2027-02-28",
     "close_date": "2027-02-28",
     "min_amount": 500000,
     "max_amount": 6000000,
-    "eligible_types": ["small business", "industry partnership", "nonprofit", "workforce board", "community college"],
-    "tags": ["apprenticeship", "skilled trades", "manufacturing workforce", "credentialing", "employer partnerships"],
+    "eligible_types": [
+      "small business",
+      "industry partnership",
+      "nonprofit",
+      "workforce board",
+      "community college"
+    ],
+    "tags": [
+      "apprenticeship",
+      "skilled trades",
+      "manufacturing workforce",
+      "credentialing",
+      "employer partnerships"
+    ],
     "sector": "workforce development",
-    "summary": "Expands registered apprenticeship pipelines in high-demand sectors through employer-led training, credential pathways, and workforce partnerships."
+    "summary": "Expands registered apprenticeship pipelines in high-demand sectors through employer-led training, credential pathways, and workforce partnerships.",
+    "url": "https://www.grants.gov/search-results-detail/FOA-ETA-27-ABA",
+    "program_url": "https://www.grants.gov/search-results-detail/FOA-ETA-27-ABA"
   },
   {
     "title": "Small Business Innovation Research (SBIR) Phase I",
-    "official_url": "https://www.grants.gov/search-grants?keywords=Small%20Business%20Innovation%20Research%20Phase%20I",
+    "official_url": "https://www.grants.gov/search-results-detail/SBIR-2027-01",
     "opportunity_number": "SBIR-2027-01",
     "deadline": "2027-06-01",
     "close_date": "2027-06-01",
     "min_amount": 150000,
     "max_amount": 350000,
-    "eligible_types": ["small business", "for-profit", "startup"],
-    "tags": ["innovation", "research and development", "prototype", "commercialization"],
+    "eligible_types": [
+      "small business",
+      "for-profit",
+      "startup"
+    ],
+    "tags": [
+      "innovation",
+      "research and development",
+      "prototype",
+      "commercialization"
+    ],
     "sector": "entrepreneurship / innovation",
-    "summary": "Supports U.S. small businesses conducting early-stage R&D with strong commercialization potential in federally relevant priority areas."
+    "summary": "Supports U.S. small businesses conducting early-stage R&D with strong commercialization potential in federally relevant priority areas.",
+    "url": "https://www.grants.gov/search-results-detail/SBIR-2027-01",
+    "program_url": "https://www.grants.gov/search-results-detail/SBIR-2027-01"
   },
   {
     "title": "EPA Community Change Grants",
-    "official_url": "https://www.grants.gov/search-grants?keywords=EPA%20Community%20Change%20Grants",
+    "official_url": "https://www.grants.gov/search-results-detail/EPA-CCG-2027",
     "opportunity_number": "EPA-CCG-2027",
     "deadline": "2027-07-31",
     "close_date": "2027-07-31",
     "min_amount": 100000,
     "max_amount": 20000000,
-    "eligible_types": ["nonprofit", "community-based organization", "tribal", "local government"],
-    "tags": ["climate resilience", "air quality", "community health", "environmental justice", "neighborhood infrastructure"],
+    "eligible_types": [
+      "nonprofit",
+      "community-based organization",
+      "tribal",
+      "local government"
+    ],
+    "tags": [
+      "climate resilience",
+      "air quality",
+      "community health",
+      "environmental justice",
+      "neighborhood infrastructure"
+    ],
     "sector": "conservation / environment",
-    "summary": "Funds place-based environmental and climate resilience projects that reduce pollution burdens and improve health and infrastructure in underserved communities."
+    "summary": "Funds place-based environmental and climate resilience projects that reduce pollution burdens and improve health and infrastructure in underserved communities.",
+    "url": "https://www.grants.gov/search-results-detail/EPA-CCG-2027",
+    "program_url": "https://www.grants.gov/search-results-detail/EPA-CCG-2027"
   },
   {
     "title": "NOAA Transformational Habitat Restoration and Coastal Resilience Grants",
-    "official_url": "https://www.grants.gov/search-grants?keywords=NOAA%20Transformational%20Habitat%20Restoration%20and%20Coastal%20Resilience%20Grants",
+    "official_url": "https://www.grants.gov/search-results-detail/NOAA-NMFS-HR-2027-2008240",
     "opportunity_number": "NOAA-NMFS-HR-2027-2008240",
     "deadline": "2027-05-20",
     "close_date": "2027-05-20",
     "min_amount": 1000000,
     "max_amount": 100000000,
-    "eligible_types": ["nonprofit", "state government", "local government", "tribal", "higher education"],
-    "tags": ["wetlands restoration", "wildlife habitat", "ecosystem restoration", "resilience", "nature-based solutions"],
+    "eligible_types": [
+      "nonprofit",
+      "state government",
+      "local government",
+      "tribal",
+      "higher education"
+    ],
+    "tags": [
+      "wetlands restoration",
+      "wildlife habitat",
+      "ecosystem restoration",
+      "resilience",
+      "nature-based solutions"
+    ],
     "sector": "conservation / environment",
-    "summary": "Supports large-scale restoration of coastal and aquatic habitats to improve ecosystem health, protect communities, and strengthen climate resilience."
+    "summary": "Supports large-scale restoration of coastal and aquatic habitats to improve ecosystem health, protect communities, and strengthen climate resilience.",
+    "url": "https://www.grants.gov/search-results-detail/NOAA-NMFS-HR-2027-2008240",
+    "program_url": "https://www.grants.gov/search-results-detail/NOAA-NMFS-HR-2027-2008240"
   },
   {
     "title": "FEMA Building Resilient Infrastructure and Communities (BRIC)",
-    "official_url": "https://www.grants.gov/search-grants?keywords=FEMA%20Building%20Resilient%20Infrastructure%20and%20Communities%20BRIC",
+    "official_url": "https://www.grants.gov/search-results-detail/DHS-24-FEMA-BRIC",
     "opportunity_number": "DHS-24-FEMA-BRIC",
     "deadline": "2027-01-31",
     "close_date": "2027-01-31",
     "min_amount": 100000,
     "max_amount": 50000000,
-    "eligible_types": ["city", "municipality", "county", "local government", "tribal"],
-    "tags": ["flood mitigation", "public safety infrastructure", "resilience planning", "hazard mitigation", "emergency management"],
+    "eligible_types": [
+      "city",
+      "municipality",
+      "county",
+      "local government",
+      "tribal"
+    ],
+    "tags": [
+      "flood mitigation",
+      "public safety infrastructure",
+      "resilience planning",
+      "hazard mitigation",
+      "emergency management"
+    ],
     "sector": "public safety / emergency management",
-    "summary": "Funds local and tribal hazard-mitigation infrastructure that reduces disaster risk, including flood and resilience technology projects."
+    "summary": "Funds local and tribal hazard-mitigation infrastructure that reduces disaster risk, including flood and resilience technology projects.",
+    "url": "https://www.grants.gov/search-results-detail/DHS-24-FEMA-BRIC",
+    "program_url": "https://www.grants.gov/search-results-detail/DHS-24-FEMA-BRIC"
   },
   {
     "title": "HUD Community Development Block Grant (CDBG)",
-    "official_url": "https://www.grants.gov/search-grants?keywords=HUD%20Community%20Development%20Block%20Grant%20CDBG",
+    "official_url": "https://www.grants.gov/search-results-detail/CDBG-ENT-2027",
     "opportunity_number": "CDBG-ENT-2027",
     "deadline": "2027-08-15",
     "close_date": "2027-08-15",
     "min_amount": 100000,
     "max_amount": 5000000,
-    "eligible_types": ["city", "municipality", "county", "local government", "state government"],
-    "tags": ["housing", "community development", "public facilities", "economic development", "low- and moderate-income communities"],
+    "eligible_types": [
+      "city",
+      "municipality",
+      "county",
+      "local government",
+      "state government"
+    ],
+    "tags": [
+      "housing",
+      "community development",
+      "public facilities",
+      "economic development",
+      "low- and moderate-income communities"
+    ],
     "sector": "housing / community development",
-    "summary": "Provides formula and competitive funding for community development, neighborhood revitalization, and infrastructure benefiting low- and moderate-income residents."
+    "summary": "Provides formula and competitive funding for community development, neighborhood revitalization, and infrastructure benefiting low- and moderate-income residents.",
+    "url": "https://www.grants.gov/search-results-detail/CDBG-ENT-2027",
+    "program_url": "https://www.grants.gov/search-results-detail/CDBG-ENT-2027"
   },
   {
     "title": "NEA Grants for Arts Projects",
-    "official_url": "https://www.grants.gov/search-grants?keywords=NEA%20Grants%20for%20Arts%20Projects",
+    "official_url": "https://www.grants.gov/search-results-detail/2027NEAP1GAP",
     "opportunity_number": "2027NEAP1GAP",
     "deadline": "2027-02-14",
     "close_date": "2027-02-14",
     "min_amount": 10000,
     "max_amount": 100000,
-    "eligible_types": ["nonprofit", "school district", "local government", "tribal"],
-    "tags": ["arts education", "creative entrepreneurship", "youth empowerment", "digital storytelling", "community media"],
+    "eligible_types": [
+      "nonprofit",
+      "school district",
+      "local government",
+      "tribal"
+    ],
+    "tags": [
+      "arts education",
+      "creative entrepreneurship",
+      "youth empowerment",
+      "digital storytelling",
+      "community media"
+    ],
     "sector": "arts / culture",
-    "summary": "Supports public-facing arts programs that increase access, build local creative economies, and serve communities through high-quality cultural programming."
+    "summary": "Supports public-facing arts programs that increase access, build local creative economies, and serve communities through high-quality cultural programming.",
+    "url": "https://www.grants.gov/search-results-detail/2027NEAP1GAP",
+    "program_url": "https://www.grants.gov/search-results-detail/2027NEAP1GAP"
   }
 ]

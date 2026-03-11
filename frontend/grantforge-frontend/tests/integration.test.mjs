@@ -20,6 +20,8 @@ test('critical endpoint routes are configured', () => {
 
 test('intake UI is polished and required validations are present', () => {
   assert.equal(appSource.includes('placeholder='), false);
+  assert.equal(appSource.includes('Phone'), false);
+  assert.equal(appSource.includes('phone'), false);
   assert.ok(appSource.includes('Organization name is required.'));
   assert.ok(appSource.includes('Please choose your organization category.'));
   assert.ok(appSource.includes('Please complete the required fields before continuing.'));
