@@ -244,7 +244,7 @@ def test_grant_url_validation_allows_only_official_grants_domain():
         == "https://www.grants.gov/search-results-detail/ABC-123"
     )
     assert (
-        srv.grant_display_url({"program_url": "https://example.com/not-allowed"}) == ""
+        srv.grant_display_url({"program_url": "https://invalid.local/not-allowed"}) == ""
     )
 
 

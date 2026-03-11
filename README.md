@@ -39,3 +39,16 @@ npm run dev
 pytest backend/tests/test_v11_server.py
 cd frontend/grantforge-frontend && npm run test:integration
 ```
+
+## Monthly Grants Dataset Refresh
+Use the CSV loader to refresh `backend/data/grants.json` from the latest Grants.gov export:
+
+```bash
+python backend/scripts/update_grants.py --csv /path/to/new/grants-search-YYYYMMDD.csv
+```
+
+Optional output override:
+
+```bash
+python backend/scripts/update_grants.py --csv /path/to/new/grants-search-YYYYMMDD.csv --out backend/data/grants.json
+```

@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 # PDF / data helpers
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph
 import pandas as pd
 
 # ---------------- bootstrap env ----------------
@@ -73,7 +75,7 @@ LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "30"))
 app = Flask(__name__)
 
 # Env-configurable CORS:
-# - default: "*" (easy testing)
+# - default: "*" (easy local use)
 # - set CORS_ORIGINS="https://yourlivefrontend.com" for locked-down live
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
 if CORS_ORIGINS == "*":
@@ -252,6 +254,7 @@ def sanitize_payload(data: Dict[str, Any]) -> Dict[str, Any]:
                     "program_url": _sanitize_text(
                         (item or {}).get("program_url", ""), 500
                     ),
+                    "url": _sanitize_text((item or {}).get("url", ""), 500),
                 }
                 for item in v[:10]
                 if isinstance(item, dict)
@@ -450,13 +453,6 @@ def _is_expired(deadline_str: str) -> bool:
         return False
 
 
-def fallback_grants_gov_url(title: str, tags: List[str], opp_number: str = "") -> str:
-    """Fallback to Grants.gov listings page when no direct opportunity URL is available."""
-    q_parts = [opp_number, title] + list(tags or [])
-    q = " ".join([p for p in q_parts if p]).strip() or "federal grants"
-    return f"https://www.grants.gov/search-grants?keywords={q.replace(' ', '%20')}"
-
-
 def _first_identifier(gr: Dict[str, Any], *keys: str) -> str:
     for k in keys:
         val = str(gr.get(k) or "").strip()
@@ -500,7 +496,10 @@ def grant_display_url(gr: Dict[str, Any]) -> str:
         candidate = _ensure_http_url(gr.get(key) or "")
         if candidate:
             return candidate
-    return ""
+    by_opp_number = grants_gov_notice_url(
+        _first_identifier(gr, "opportunity_number", "opp_number")
+    )
+    return _ensure_http_url(by_opp_number) or ""
 
 
 def _is_session_already_downloaded(session_id: str) -> bool:
@@ -1261,15 +1260,19 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
         return _wrap_draw_line(c, text, left_margin, y, width_chars=line_width_chars)
 
     def draw_hyperlink(label: str, url: str) -> int:
-        display = label
-        c.setFillColorRGB(0.0, 0.2, 0.8)
-        c.drawString(left_margin, y, display)
-        text_width = c.stringWidth(display, "Helvetica", 10)
-        c.linkURL(
-            url, (left_margin, y - 2, left_margin + text_width, y + 10), relative=0
+        styles = getSampleStyleSheet()
+        style = styles["Normal"].clone("GrantLinkStyle")
+        style.fontName = "Helvetica"
+        style.fontSize = 10
+        style.leading = 14
+        style.textColor = "#003399"
+        para = Paragraph(
+            f'<a href="{url}">{_sanitize_text(label, 240)}</a>',
+            style,
         )
-        c.setFillColorRGB(0, 0, 0)
-        return y - 14
+        wrapped_w, wrapped_h = para.wrap(letter[0] - (left_margin * 2), 100)
+        para.drawOn(c, left_margin, y - wrapped_h + 2)
+        return y - wrapped_h - 4
 
     draft_body = payload.get("draft_body")
     if isinstance(draft_body, str) and draft_body.strip():
@@ -1309,7 +1312,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
 
         grant_url = (payload.get("grant_url") or "").strip()
         if grant_url:
-            y = draw_hyperlink(f"Official opportunity URL: {grant_url}", grant_url)
+            y = draw_hyperlink("Grant Opportunity", grant_url)
 
         recommendations = (
             payload.get("recommendations")
@@ -1324,7 +1327,10 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
                 title = _sanitize_text(
                     (rec or {}).get("title", "Untitled opportunity"), 180
                 )
-                rec_url = _sanitize_text((rec or {}).get("program_url", ""), 500)
+                rec_url = _sanitize_text(
+                    (rec or {}).get("program_url") or (rec or {}).get("url", ""),
+                    500,
+                )
                 if not rec_url:
                     continue
                 if y < bottom_margin:
@@ -1518,6 +1524,7 @@ def create_checkout_session():
         session = stripe.checkout.Session.create(
             mode="payment",
             payment_method_types=["card"],
+            phone_number_collection={"enabled": False},
             line_items=[
                 {
                     "price_data": {
