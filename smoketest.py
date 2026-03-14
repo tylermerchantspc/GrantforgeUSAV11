@@ -62,7 +62,7 @@ def run_grant_link_checks():
         opp_number = row.get("opp_number") or row.get("opportunity_number")
         assert url.startswith("https://www.grants.gov/"), f"unexpected domain: {url}"
         if opp_number:
-            assert "search-results-detail" in url, f"not direct notice link: {url}"
+            assert ("opportunity/details/" in url) or ("search-results?query=" in url), f"not valid official grants URL: {url}"
 
 
 def run_checkout_config_checks():

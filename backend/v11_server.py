@@ -461,12 +461,19 @@ def _first_identifier(gr: Dict[str, Any], *keys: str) -> str:
     return ""
 
 
-def grants_gov_notice_url(opp_number: str) -> str:
-    clean_opp = re.sub(r"\s+", " ", (opp_number or "").strip())
-    if not clean_opp:
+def grants_gov_detail_url(identifier: str) -> str:
+    clean_id = re.sub(r"\s+", "", (identifier or "").strip())
+    if not clean_id:
         return ""
-    encoded = re.sub(r"\s+", "%20", clean_opp)
-    return f"https://www.grants.gov/search-results-detail/{encoded}"
+    return f"https://www.grants.gov/opportunity/details/{clean_id}"
+
+
+def grants_gov_search_url(query: str) -> str:
+    clean_query = re.sub(r"\s+", " ", (query or "").strip())
+    if not clean_query:
+        return ""
+    encoded = re.sub(r"\s+", "%20", clean_query)
+    return f"https://www.grants.gov/search-results?query={encoded}"
 
 
 def _safe_grants_url(url: str) -> Optional[str]:
@@ -480,6 +487,12 @@ def _safe_grants_url(url: str) -> Optional[str]:
     if (
         "apply07.grants.gov" in lowered
         or "grantsws/rest/opportunities/details" in lowered
+        or "search-results-detail/" in lowered
+    ):
+        return None
+    if not (
+        lowered.startswith("https://www.grants.gov/opportunity/details/")
+        or lowered.startswith("https://www.grants.gov/search-results?query=")
     ):
         return None
     return candidate
@@ -491,15 +504,23 @@ def _ensure_http_url(url: str) -> Optional[str]:
 
 
 def grant_display_url(gr: Dict[str, Any]) -> str:
-    """Return only a validated official Grants.gov opportunity URL."""
-    for key in ("program_url", "url", "official_url", "funding_url"):
+    """Return a validated official Grants.gov URL with direct-link priority."""
+    for key in ("official_url", "program_url", "url", "funding_url"):
         candidate = _ensure_http_url(gr.get(key) or "")
         if candidate:
             return candidate
-    by_opp_number = grants_gov_notice_url(
-        _first_identifier(gr, "opportunity_number", "opp_number")
-    )
-    return _ensure_http_url(by_opp_number) or ""
+
+    direct_identifier = _first_identifier(gr, "opp_id", "opportunity_id")
+    by_opp_id = _ensure_http_url(grants_gov_detail_url(direct_identifier))
+    if by_opp_id:
+        return by_opp_id
+
+    opp_number = _first_identifier(gr, "opportunity_number", "opp_number")
+    by_opp_number_search = _ensure_http_url(grants_gov_search_url(opp_number))
+    if by_opp_number_search:
+        return by_opp_number_search
+
+    return _ensure_http_url(grants_gov_search_url(str(gr.get("title") or ""))) or ""
 
 
 def _is_session_already_downloaded(session_id: str) -> bool:

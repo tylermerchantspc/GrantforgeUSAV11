@@ -10,13 +10,29 @@ import {
 } from "./fetcher";
 import "./App.css";
 
-/* -------- Safe Grants.gov direct opportunity URL helper -------- */
-function safeProgramUrl(u, _title, row = {}) {
-  const official = row.program_url || row.url || row.official_url || u || "";
+/* -------- Safe Grants.gov official opportunity URL helper -------- */
+function safeProgramUrl(u, title, row = {}) {
+  const official = row.official_url || row.program_url || row.url || u || "";
   if (typeof official === "string" && official.startsWith("https://www.grants.gov")) {
-    return official;
+    if (
+      !official.includes("apply07.grants.gov") &&
+      !official.includes("grantsws/rest/opportunities/details") &&
+      !official.includes("search-results-detail/") &&
+      (
+        official.startsWith("https://www.grants.gov/opportunity/details/") ||
+        official.startsWith("https://www.grants.gov/search-results?query=")
+      )
+    ) {
+      return official;
+    }
   }
-  return null;
+
+  const oppIdentifier = (row.opp_id || row.opportunity_id || row.opp_number || row.opportunity_number || "").toString().trim();
+  if (oppIdentifier) return `https://www.grants.gov/opportunity/details/${encodeURIComponent(oppIdentifier)}`;
+
+  const fallbackQuery = (title || row.title || "").toString().trim();
+  if (!fallbackQuery) return null;
+  return `https://www.grants.gov/search-results?query=${encodeURIComponent(fallbackQuery)}`;
 }
 
 /* -------- Success Screen -------- */
@@ -356,7 +372,7 @@ function IntakeApp() {
                       if (!directUrl) return null;
                       return (
                         <div className="muted" style={{ marginTop: 4 }}>
-                          <a href={directUrl} target="_blank" rel="noopener noreferrer">Official Grants.gov opportunity</a>
+                          <a href={directUrl} target="_blank" rel="noopener noreferrer">View official notice on Grants.gov</a>
                         </div>
                       );
                     })()}
