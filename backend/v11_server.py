@@ -516,9 +516,9 @@ def grant_display_url(gr: Dict[str, Any]) -> str:
         return by_opp_id
 
     opp_number = _first_identifier(gr, "opportunity_number", "opp_number")
-    by_opp_number_search = _ensure_http_url(grants_gov_search_url(opp_number))
-    if by_opp_number_search:
-        return by_opp_number_search
+    by_opp_number = _ensure_http_url(grants_gov_detail_url(opp_number))
+    if by_opp_number:
+        return by_opp_number
 
     return _ensure_http_url(grants_gov_search_url(str(gr.get("title") or ""))) or ""
 
@@ -607,18 +607,7 @@ def score_grant(
     score += 100
     fit_notes.append(f"Eligibility matched for {applicant_type}.")
 
-    # 2) sector relevance (after eligibility gate)
-    if requested_sector and grant_sector:
-        if requested_sector == grant_sector:
-            score += 35
-            fit_notes.append(f"Sector aligned: {requested_sector}.")
-        else:
-            score -= 45
-            fit_notes.append(
-                f"Sector mismatch: client {requested_sector}, program {grant_sector}."
-            )
-
-    # 3) keyword overlap
+    # 2) keyword overlap
     tags = normalized_tags(gr.get("tags", []))
     summary_tokens = normalized_tags(_tokenize_text(gr.get("summary", "")))
     keyword_terms = set()
@@ -640,6 +629,17 @@ def score_grant(
         if kws:
             score -= 25
             fit_notes.append("Weak keyword overlap with this opportunity.")
+
+    # 3) category relevance
+    if requested_sector and grant_sector:
+        if requested_sector == grant_sector:
+            score += 30
+            fit_notes.append(f"Sector aligned: {requested_sector}.")
+        else:
+            score -= 28
+            fit_notes.append(
+                f"Sector mismatch: client {requested_sector}, program {grant_sector}."
+            )
 
     # 4) funding fit
     min_amt = _safe_float(gr.get("min_amount"), 0.0)
@@ -835,7 +835,7 @@ def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
     ):
         return applicant_type in ("SMALL_BUSINESS", "NONPROFIT")
 
-    if applicant_type == "NONPROFIT" and any(
+    if applicant_type in ("NONPROFIT", "EDU") and any(
         k in haystack for k in ["telecom", "telecommunications", "broadband", "fiber"]
     ):
         return False
@@ -909,8 +909,6 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
                 continue
 
             s = score_grant(gr, category, kws, amount)
-            if s["score"] < 80:
-                continue
 
             url = grant_display_url(gr)
             built.append(
@@ -943,44 +941,6 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
         return built
 
     rows = build_rows(eligibility_required=True)
-    if not rows:
-        rows = build_rows(eligibility_required=False)
-    if not rows:
-        for gr in grants:
-            close_date = gr.get("close_date") or gr.get("deadline") or ""
-            if _safe_float(gr.get("max_amount"), 0) > 2_000_000:
-                continue
-            if not include_expired and _is_expired(close_date):
-                continue
-            s = score_grant(gr, category, kws, amount)
-            url = grant_display_url(gr)
-            rows.append(
-                {
-                    "title": gr.get("title"),
-                    "program": gr.get("program")
-                    or gr.get("program_id")
-                    or gr.get("program_url")
-                    or "unknown",
-                    "program_url": url,
-                    "program_id": gr.get("program_id", ""),
-                    "opp_id": gr.get("opp_id") or gr.get("opportunity_id") or "",
-                    "opp_number": gr.get("opp_number")
-                    or gr.get("opportunity_number")
-                    or "",
-                    "official_url": url,
-                    "amount": f"${int(_safe_float(gr.get('max_amount'), 0)):,.0f}",
-                    "deadline": close_date or "TBA",
-                    "fit": s["fit"],
-                    "score": s["score"],
-                    "fit_notes": s["fit_notes"],
-                    "requires_match_percent": gr.get("requires_match_percent", 0),
-                    "max_amount": _safe_float(gr.get("max_amount"), 0),
-                    "tags": gr.get("tags", []),
-                    "sector": gr.get("sector", ""),
-                    "summary": gr.get("summary", ""),
-                    "level": "Federal",
-                }
-            )
 
     rows.sort(
         key=lambda r: (
@@ -1124,9 +1084,9 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     intake.pop("eligible_state", None)
 
     org = _organization_name(intake)
-    proj_title = (intake.get("projectTitle") or "Strategic initiative").strip()
+    proj_title = (intake.get("projectTitle") or "Strategic Initiative").strip()
     category = (intake.get("category") or intake.get("who") or "organization").strip()
-    audience = (intake.get("audience") or "participants").strip().rstrip(".")
+    audience = (intake.get("audience") or "program participants").strip().rstrip(".")
     timeline = (intake.get("timeline") or "12 months").strip().rstrip(".")
     notes = (intake.get("notes") or "").strip()
     stated_need = (intake.get("need") or "").strip()
@@ -1142,9 +1102,7 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     g_max = _safe_float(grant.get("max_amount"), 0)
     g_url = grant_display_url(grant) if grant else ""
 
-    req_str = (
-        f"${amount:,.0f}" if amount > 0 else "an amount aligned with program priorities"
-    )
+    req_str = f"${amount:,.0f}" if amount > 0 else "an amount aligned with program priorities"
     aligned_request = min(amount, g_max) if (amount > 0 and g_max > 0) else amount
     aligned_req_str = f"${aligned_request:,.0f}" if aligned_request > 0 else req_str
 
@@ -1152,21 +1110,21 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
         stated_need
         or notes
         or (
-            f"{org} has identified documented barriers affecting {audience}, including uneven access to high-quality services and limited capacity to sustain measurable outcomes."
+            f"{org} has identified persistent service gaps for {audience}, including uneven access to high-quality support, limited program continuity, and insufficient resources to sustain measurable improvement."
         )
     )
     budget_context = (
-        f"The organization currently operates with an estimated annual budget of ${annual_budget:,.0f}, demonstrating established fiscal controls, procurement discipline, and compliant grants management practices."
+        f"The organization currently manages an annual operating budget of approximately ${annual_budget:,.0f}, supported by established internal controls, segregation of duties, and board-level fiscal oversight."
         if annual_budget > 0
-        else "The organization maintains financial controls, procurement standards, and leadership oversight consistent with federal grant administration requirements."
+        else "The organization maintains grant-ready financial controls, procurement standards, and leadership oversight consistent with federal compliance expectations."
     )
 
     objectives = _mk_objectives_from_keywords(kws, audience)
     if not objectives:
         objectives = [
-            f"Deliver {proj_title} through a structured model with clear milestones and accountability for {audience}.",
-            "Increase participation and retention across the implementation period through coordinated service delivery.",
-            "Demonstrate measurable performance gains through routine monitoring, data review, and corrective action protocols.",
+            f"Deliver {proj_title} through a structured model with clear milestones and documented accountability for {audience}.",
+            "Increase participation and retention through coordinated outreach, service delivery, and continuous engagement practices.",
+            "Demonstrate measurable gains through routine monitoring, data-informed adjustments, and quarterly performance review.",
         ]
 
     match_clause = (
@@ -1175,49 +1133,55 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
         else ""
     )
     ceiling_clause = (
-        f" Because the requested amount exceeds the published ceiling, this narrative aligns budget assumptions to approximately {aligned_req_str} while preserving core outcomes through phased implementation."
+        f" Because the requested amount exceeds the published award ceiling, this narrative aligns budget assumptions to approximately {aligned_req_str} while preserving core outcomes through phased implementation."
         if g_max > 0 and amount > g_max
         else ""
     )
 
+    outcome_targets = [
+        "Increase direct participant engagement by at least 20% over baseline within the first implementation year.",
+        "Achieve measurable proficiency or competency improvement for at least 70% of participants receiving full program dosage.",
+        "Maintain on-time milestone completion of at least 90% across implementation, reporting, and compliance activities.",
+    ]
+
     sections = [
         (
-            "Introduction\n"
-            f"{org} respectfully submits this proposal narrative for the {g_title} opportunity in support of '{proj_title}'. "
-            f"As a {category}, the organization proposes a disciplined, outcomes-focused initiative for {audience} in the {client_sector} domain over {timeline}. "
-            "Moreover, the proposal presents a credible implementation framework, strong governance, and measurable public benefit."
+            "Executive Summary\n"
+            f"{org} submits this proposal for the {g_title} opportunity to implement '{proj_title}', a focused initiative designed for {audience}. As a {category}, the organization is positioned to execute a disciplined program in the {client_sector} domain over {timeline}. The request seeks {req_str} to launch or scale activities that address documented barriers, produce measurable outcomes, and align with federal priorities for equitable access, service quality, and accountability. The implementation approach integrates strategic planning, practical delivery milestones, and compliance-ready oversight so reviewers can clearly evaluate readiness, impact potential, and responsible stewardship of federal funds."
         ),
         (
-            "Problem Statement\n"
-            f"The request is grounded in documented need: {need_context} "
-            "Consequently, federal investment is necessary to close service gaps, strengthen delivery capacity, and advance equitable access to results-oriented programming."
+            "Statement of Need\n"
+            f"The proposed project responds to a clearly documented need: {need_context} Current conditions limit timely access to services, reduce continuity for high-need populations, and constrain long-term outcomes where sustained intervention is required. Without external investment, existing resources are insufficient to provide the scale, consistency, and quality controls necessary for durable results. This proposal addresses those constraints by pairing evidence-informed programming with realistic implementation sequencing, cross-functional coordination, and consistent performance monitoring. Federal support is therefore essential to close service gaps, improve operational capacity, and deliver measurable public benefit for the target population."
         ),
         (
-            "Objectives\n"
-            + " ".join([f"({i+1}) {obj}" for i, obj in enumerate(objectives[:4])])
-            + " Therefore, these objectives establish measurable priorities for delivery, accountability, and performance oversight throughout the project period."
+            "Program Description\n"
+            f"The program will be delivered as an integrated model with phased rollout, frontline implementation supports, and periodic quality assurance checkpoints. Core activities include: (1) {objectives[0]} (2) {objectives[1]} (3) {objectives[2]} "
+            "Program leadership will coordinate staffing, partner alignment, and procurement planning in advance of full launch, then transition to consistent service delivery with monthly management reviews. Data collection procedures will be embedded from project start to support performance tracking, rapid issue resolution, and reporting confidence throughout the grant period."
         ),
         (
-            "Program Design\n"
-            f"Implementation will proceed through phased milestones across {timeline}, beginning with launch readiness and baseline assessment, followed by full service delivery and continuous quality improvement cycles. "
-            "In addition, leadership will maintain monthly progress reviews, risk controls, procurement compliance, and documentation standards to ensure execution fidelity."
+            "Target Population\n"
+            f"The primary beneficiaries are {audience}. The project design prioritizes populations facing access barriers, service discontinuity, or measurable outcome disparities within the service area. Outreach and intake processes will be structured to improve participation among underrepresented groups while maintaining transparent eligibility and referral standards. Program activities are designed to be practical, culturally responsive, and outcomes-oriented so participants receive sustained support rather than one-time interventions. This approach strengthens equity, increases participation persistence, and improves the likelihood of durable gains tied to project objectives."
         ),
         (
-            "Budget\n"
-            f"The proposed request of {req_str} is structured to align with allowable federal cost categories and implementation milestones. {budget_context}"
-            f"{ceiling_clause}{match_clause} Furthermore, quarterly budget reviews and variance monitoring will support compliance, transparency, and audit readiness."
+            "Implementation Plan\n"
+            f"Implementation will follow a structured timeline of {timeline} with three operational phases: launch readiness, full implementation, and refinement for sustainability. During launch readiness, the organization will finalize staffing assignments, partner roles, baseline metrics, and procurement actions. During full implementation, services will be delivered at planned dosage with monthly progress reviews and risk-management checks. During refinement, leadership will analyze performance trends, document lessons learned, and apply corrective actions to strengthen outcomes. Throughout all phases, governance protocols will support schedule adherence, quality control, fiscal compliance, and responsive project management."
         ),
         (
-            "Conclusion\n"
-            f"In conclusion, {org} is prepared to implement '{proj_title}' for {audience} with qualified leadership, disciplined oversight, and measurable outcomes. "
-            "Accordingly, the organization will sustain implementation quality through continuous monitoring, partner coordination, and executive governance. "
-            f"Prior to submission, leadership will re-validate all requirements and deadlines for {g_title} (deadline: {g_deadline})."
-            + (
-                " The official Grants.gov opportunity URL is provided in the order details section."
-                if g_url
-                else ""
-            )
-            + " Final executive review and authorization will be completed before filing."
+            "Expected Outcomes\n"
+            f"Expected outcomes are specific, measurable, and aligned to grant priorities. By the end of the project period, {org} will target the following benchmarks: {outcome_targets[0]} {outcome_targets[1]} {outcome_targets[2]} Outcome data will be reviewed on a recurring basis by program and executive leadership to verify trajectory, identify gaps, and apply evidence-based adjustments. This framework ensures the project is not only active, but demonstrably effective in producing meaningful improvements for the intended population."
+        ),
+        (
+            "Organizational Capacity\n"
+            f"{org} has the operational and administrative capacity to execute this project with consistency and accountability. The organization maintains defined leadership roles, established oversight routines, and documented procedures for procurement, reporting, and financial management. {budget_context} Program delivery teams will be supported by management personnel responsible for milestone tracking, partner communication, and compliance documentation. This structure positions the organization to administer federal funds responsibly while maintaining service quality and implementation discipline."
+        ),
+        (
+            "Budget Use\n"
+            f"The budget request of {req_str} will be allocated across direct program delivery, personnel time, implementation supports, participant resources, and evaluation activities required to achieve project outcomes. Budget assumptions align with allowable federal cost principles and practical delivery requirements.{ceiling_clause}{match_clause} Quarterly fiscal reviews will compare planned versus actual expenditures, validate allowability, and document variances with corrective action when needed. This disciplined budget approach supports transparency, audit readiness, and strong alignment between spending and measurable performance results."
+        ),
+        (
+            "Sustainability\n"
+            f"Sustainability planning is built into project design from the outset. Throughout implementation, {org} will document effective practices, build partner commitments, and integrate successful activities into ongoing organizational operations where feasible. Performance evidence generated during the grant period will be used to support continuation strategies, including future funding applications, braided resource planning, and program refinement. Prior to submission, leadership will complete final validation of all opportunity requirements for {g_title} (deadline: {g_deadline})."
+            + (" The official Grants.gov opportunity URL is included in the order details section." if g_url else "")
         ),
     ]
 
@@ -1324,6 +1288,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
             f"Project title: {payload.get('projectTitle', '')}",
             f"Applicant type: {payload.get('category', '')}",
             f"Requested amount: ${_safe_float(payload.get('amountRequested'), 0):,.2f}",
+            f"Service fee: ${FLAT_PRICE:,.2f}",
             f"Recommended opportunity: {payload.get('grant_title', '')}",
         ]
         for line in summary_lines:

@@ -84,22 +84,22 @@ function ThanksScreen() {
       </header>
 
       <section className="card" aria-live="polite">
-        <h2>Your grant narrative is ready</h2>
+        <h2>Payment Success</h2>
         {url ? (
           <p>
-            <a id="downloadLink" href={url}>Download Grant Narrative PDF</a>
+            <a id="downloadLink" href={url}>Download Draft PDF</a>
             {!paid && <span className="muted" style={{ marginLeft: 8 }}>(payment finalizing)</span>}
           </p>
         ) : (
           <p className="error">{err || "Preparing your file..."}</p>
         )}
-        <p className="muted">Keep this link for your records and internal review workflow.</p>
+        <p className="muted">Keep this link for your records.</p>
       </section>
 
       <footer className="footer">
         <p>© 2025 GrantForgeUSA</p>
         <p className="muted">
-          Review and edit all draft materials before submission.
+          You may request edits before submitting to any funding organization.
         </p>
       </footer>
     </div>
@@ -228,8 +228,8 @@ function IntakeApp() {
 
       <section className="card">
         <h2>Tell us about your project</h2>
-        <p className="muted">Flat fee: $2,500 per proposal draft. All sales final. No refunds.</p>
-        <p className="muted" style={{ marginTop: 4 }}>Provide brief answers. We will match your project to federal grant opportunities.</p>
+        <p className="muted">Free intake and recommendations. Flat fee: $2,500 per proposal draft. All sales final. No refunds.</p>
+        <p className="muted" style={{ marginTop: 4 }}>Provide brief, clear answers. We will match your project to the best available federal opportunities.</p>
         <p className="muted" style={{ marginTop: 4 }}>
           We do not guarantee funding and do not submit grants on your behalf.
         </p>
