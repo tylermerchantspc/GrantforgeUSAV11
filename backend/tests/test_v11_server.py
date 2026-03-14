@@ -239,9 +239,9 @@ def test_session_cannot_be_reused_after_download(client, monkeypatch):
 def test_grant_url_validation_allows_only_official_grants_domain():
     assert (
         srv.grant_display_url(
-            {"program_url": "https://www.grants.gov/search-results-detail/ABC-123"}
+            {"program_url": "https://www.grants.gov/opportunity/details/ABC-123"}
         )
-        == "https://www.grants.gov/search-results-detail/ABC-123"
+        == "https://www.grants.gov/opportunity/details/ABC-123"
     )
     assert (
         srv.grant_display_url({"program_url": "https://invalid.local/not-allowed"}) == ""
