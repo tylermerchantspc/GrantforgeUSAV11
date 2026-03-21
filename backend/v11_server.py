@@ -3,7 +3,7 @@
 #          REAL narrative draft generation, reliable PDF download
 #          (eager + webhook), contextual previews, and debug utilities.
 
-import os, json, re, secrets, threading, time
+import os, sys, json, re, secrets, threading, time
 from datetime import datetime, date, timedelta
 from collections import defaultdict, deque
 from typing import Dict, Any, List, Optional, Tuple
@@ -12,6 +12,13 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import stripe
 from dotenv import load_dotenv
+
+CURRENT_DIR = os.path.dirname(__file__)
+ROOT_DIR = os.path.dirname(CURRENT_DIR)
+if ROOT_DIR and ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from runtime_config import load_runtime_settings
 
 # PDF / data helpers
 from reportlab.lib.pagesizes import letter
@@ -22,16 +29,17 @@ import pandas as pd
 
 # ---------------- bootstrap env ----------------
 load_dotenv()
+SETTINGS = load_runtime_settings()
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://grantforge-usav-11.vercel.app")
 FRONTEND_THANKS_URL = os.getenv("FRONTEND_THANKS_URL", f"{FRONTEND_URL}/thanks")
 
 # Stripe
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")  # sk_test_... / sk_live_...
-PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")  # pk_test_... / pk_live_...
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")  # whsec_...
+stripe.api_key = SETTINGS.stripe_secret_key
+PUBLISHABLE_KEY = SETTINGS.stripe_publishable_key
+STRIPE_WEBHOOK_SECRET = SETTINGS.stripe_webhook_secret
 
-APP_MODE = os.getenv("APP_MODE", "production").lower()
+APP_MODE = SETTINGS.app_mode
 
 # ===== Writable storage (Render dynos can only write to /tmp) =====
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/tmp/grantforge_v11")
@@ -1120,12 +1128,15 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     )
 
     objectives = _mk_objectives_from_keywords(kws, audience)
+    fallback_objectives = [
+        f"Deliver {proj_title} through a structured model with clear milestones and documented accountability for {audience}.",
+        "Increase participation and retention through coordinated outreach, service delivery, and continuous engagement practices.",
+        "Demonstrate measurable gains through routine monitoring, data-informed adjustments, and quarterly performance review.",
+    ]
     if not objectives:
-        objectives = [
-            f"Deliver {proj_title} through a structured model with clear milestones and documented accountability for {audience}.",
-            "Increase participation and retention through coordinated outreach, service delivery, and continuous engagement practices.",
-            "Demonstrate measurable gains through routine monitoring, data-informed adjustments, and quarterly performance review.",
-        ]
+        objectives = list(fallback_objectives)
+    while len(objectives) < 3:
+        objectives.append(fallback_objectives[len(objectives)])
 
     match_clause = (
         f" A documented strategy will satisfy the required {g_match}% match through eligible cash and in-kind contributions."

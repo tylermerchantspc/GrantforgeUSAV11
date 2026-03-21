@@ -67,9 +67,13 @@ def run_grant_link_checks():
 
 def run_checkout_config_checks():
     source = Path("backend/v11_server.py").read_text(encoding="utf-8")
-    assert "phone_number_collection" not in source, "phone number collection must be disabled"
+    assert 'phone_number_collection={"enabled":False}' in source.replace(
+        " ", ""
+    ), "phone number collection must remain explicitly disabled"
     assert '@app.get("/get/debug-paths")' in source, "debug endpoint missing"
-    assert 'return jsonify(ok=False, error="Not found"), 404' in source, "debug endpoint should be disabled"
+    assert (
+        'return jsonify(ok=False, error="Unauthorized"), 401' in source
+    ), "debug endpoint should require explicit operator authorization"
 
 
 def main():

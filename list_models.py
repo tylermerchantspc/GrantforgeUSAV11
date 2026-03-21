@@ -1,12 +1,12 @@
-# list_models.py
-import os
+"""List available Google Generative Language models for a configured API key."""
+
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-load_dotenv()  # reads .env in project root
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    raise SystemExit("GEMINI_API_KEY not found. Put it in .env like: GEMINI_API_KEY=your_key_here")
+from runtime_config import load_google_api_key
+
+load_dotenv()
+api_key = load_google_api_key()
 
 genai.configure(api_key=api_key)
 

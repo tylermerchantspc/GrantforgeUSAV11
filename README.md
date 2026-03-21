@@ -11,15 +11,26 @@
 - Security headers (HSTS on HTTPS, frame/content-type/referrer policies) are applied to responses.
 
 ## Environment variables
-Set these for production:
+Copy `.env.example` and set values through runtime environment variables only (never commit `.env` files).
+
+Required in production:
 - `STRIPE_SECRET_KEY`
 - `STRIPE_PUBLISHABLE_KEY`
-- `STRIPE_WEBHOOK_SECRET`
 - `FRONTEND_URL`
 - `FRONTEND_THANKS_URL`
+- `VITE_API_BASE` (frontend runtime)
+
+Optional but recommended:
+- `STRIPE_WEBHOOK_SECRET`
 - `CORS_ORIGINS`
 - `ENABLE_DEBUG_ENDPOINTS=false`
 - `LOG_RETENTION_DAYS=30`
+- `DOWNLOAD_TOKEN_TTL_SECONDS=86400`
+
+Google/Gemini key contract:
+- Use **only** `GOOGLE_API_KEY`.
+- `GEMINI_API_KEY` is deprecated and rejected.
+- Restrict the key to the required Google Generative Language APIs, with IP/referrer restrictions where possible.
 
 ## Run backend
 ```bash
@@ -52,3 +63,13 @@ Optional output override:
 ```bash
 python backend/scripts/update_grants.py --csv /path/to/new/grants-search-YYYYMMDD.csv --out backend/data/grants.json
 ```
+
+
+## Security incident response checklist (maintainer)
+1. Rotate compromised keys in provider consoles immediately (Stripe + Google if exposed).
+2. Remove leaked values from git history if a secret ever appeared in prior commits.
+3. Example history rewrite (run from a protected maintenance clone):
+```bash
+git filter-repo --path backend/.env --path frontend/grantforge-frontend/.env --invert-paths
+```
+4. Force-push rewritten branches and coordinate downstream re-clones.

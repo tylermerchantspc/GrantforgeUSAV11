@@ -9,6 +9,7 @@ import {
   receiptByToken,
 } from "./fetcher";
 import "./App.css";
+import { API_BASE } from "./config";
 
 /* -------- Safe Grants.gov official opportunity URL helper -------- */
 function safeProgramUrl(u, title, row = {}) {
@@ -127,6 +128,12 @@ function IntakeApp() {
   const [fieldErrors, setFieldErrors] = useState({});
 
   const federalResults = results;
+
+  useEffect(() => {
+    if (!API_BASE) {
+      setError("Frontend is not configured. Set VITE_API_BASE and restart the app.");
+    }
+  }, []);
 
   function intakePayload() {
     return {
@@ -337,7 +344,7 @@ function IntakeApp() {
           />
         </label>
 
-        <button disabled={loading} onClick={handleSeeRecommendations}>
+        <button disabled={loading || !API_BASE} onClick={handleSeeRecommendations}>
           {loading ? "Finding matches..." : "See Recommendations"}
         </button>
         {error && <p className="error" role="alert">{error}</p>}
@@ -393,7 +400,7 @@ function IntakeApp() {
                       >
                         {previewBusy[row.title] ? "Building preview…" : "Preview Narrative"}
                       </button>
-                      <button onClick={()=>handlePay(row)} disabled={loading}>
+                      <button onClick={()=>handlePay(row)} disabled={loading || !API_BASE}>
                         Pay Now — $2,500
                       </button>
                     </div>
