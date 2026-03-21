@@ -82,12 +82,11 @@ def test_narrative_uses_senior_sections():
         ),
         grant,
     )
-    assert "Introduction" in text
-    assert "Problem Statement" in text
-    assert "Objectives" in text
-    assert "Program Design" in text
-    assert "Budget" in text
-    assert "Conclusion" in text
+    assert "Executive Summary" in text
+    assert "Statement of Need" in text
+    assert "Program Description" in text
+    assert "Budget Use" in text
+    assert "Sustainability" in text
 
 
 def _run_paid_pdf_flow(client, monkeypatch, payload):

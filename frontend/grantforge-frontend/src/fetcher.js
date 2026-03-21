@@ -1,8 +1,14 @@
 // src/fetcher.js — v1.4 (backend v11.1 aligned, production safe)
-import { ENDPOINTS, API_BASE } from "./config";
+import { ENDPOINTS, API_BASE, validateApiBase } from "./config";
 
 /* ---------- safe fetch helper with timeout & clearer errors ---------- */
 async function safeFetch(url, options = {}, { timeoutMs = 20000 } = {}) {
+  try {
+    validateApiBase();
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
 

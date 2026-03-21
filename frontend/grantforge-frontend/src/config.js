@@ -1,13 +1,18 @@
-// src/config.js — v1.4 (backend v11.2 aligned)
+// src/config.js — runtime-configured backend endpoints
 function sanitizeBase(url) {
   if (!url) return "";
   return url.endsWith("/") ? url.slice(0, -1) : url;
 }
 
-export const API_BASE = sanitizeBase(
-  import.meta.env.VITE_API_BASE ||
-  "https://grantforgeusa-v11-backend.onrender.com"
-);
+export const API_BASE = sanitizeBase(import.meta.env.VITE_API_BASE || "");
+
+export function validateApiBase() {
+  if (!API_BASE) {
+    throw new Error(
+      "Frontend is not configured: missing VITE_API_BASE. Set VITE_API_BASE in your environment and restart the frontend."
+    );
+  }
+}
 
 export const ENDPOINTS = Object.freeze({
   health: `${API_BASE}/get/health`,
@@ -20,4 +25,4 @@ export const ENDPOINTS = Object.freeze({
   downloadBySession: `${API_BASE}/download-by-session`,
 });
 
-export default Object.freeze({ API_BASE, ENDPOINTS });
+export default Object.freeze({ API_BASE, ENDPOINTS, validateApiBase });

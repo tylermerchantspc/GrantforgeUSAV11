@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Node
+frontend/grantforge-frontend/node_modules/
+frontend/grantforge-frontend/dist/
+
+# Local runtime secrets/config
+.env
+.env.*
+*.env
+backend/.env
+frontend/grantforge-frontend/.env
+!.env.example
+!backend/.env.example
+!frontend/grantforge-frontend/.env.example
+
+# Local artifacts
+*.log
+.DS_Store
