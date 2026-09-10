@@ -1,0 +1,41 @@
+name: One-time receipt fallback fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-receipt-fallback-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Remove obsolete receipt fallback
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('frontend/grantforge-frontend/src/App.jsx')
+          text = path.read_text(encoding='utf-8')
+          old = 'formatMoney(receipt?.amount_total || 2500)'
+          new = 'receipt?.amount_total ? formatMoney(receipt.amount_total) : "Paid"'
+          if old not in text:
+              raise SystemExit('Expected obsolete receipt fallback was not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+      - name: Verify
+        run: |
+          ! grep -q 'amount_total || 2500' frontend/grantforge-frontend/src/App.jsx
+      - name: Commit fix
+        run: |
+          git config user.name 'GrantForgeUSA automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add frontend/grantforge-frontend/src/App.jsx
+          git commit -m 'Remove obsolete checkout receipt fallback'
+          git push origin main
