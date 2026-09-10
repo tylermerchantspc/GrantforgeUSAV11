@@ -1,4 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  createDownloadToken,
+  downloadUrlByToken,
+  receiptByToken,
+} from "./fetcher";
 import "./App.css";
 
 const PILOT_EMAIL = (
@@ -224,6 +229,7 @@ function buildApplication(form) {
 }
 
 function LandingPage() {
+  const formRef = useRef(null);
   const [form, setForm] = useState(INITIAL_FORM);
   const [status, setStatus] = useState("");
   const [fallbackText, setFallbackText] = useState("");
@@ -245,19 +251,31 @@ function LandingPage() {
       form.contactEmail.trim() &&
       form.applicantType &&
       form.annualBudget &&
-      form.requestedAmount &&
+      Number(form.requestedAmount) > 0 &&
       form.projectSummary.trim() &&
       form.acknowledge &&
       form.consent
     );
   }
 
+  function validateApplication(formElement = formRef.current) {
+    if (formElement && !formElement.checkValidity()) {
+      formElement.reportValidity();
+      setStatus("Correct the highlighted fields before continuing.");
+      return false;
+    }
+
+    if (!isComplete()) {
+      setStatus("Complete the required fields and acknowledgments before continuing.");
+      return false;
+    }
+
+    return true;
+  }
+
   function prepareEmail(event) {
     event.preventDefault();
-    if (!isComplete()) {
-      setStatus("Complete the required fields and acknowledgments before preparing the email.");
-      return;
-    }
+    if (!validateApplication(event.currentTarget)) return;
 
     const subject = `[GrantForgeUSA Pilot] ${form.organization.trim()}`;
     const body = buildApplication(form);
@@ -266,10 +284,7 @@ function LandingPage() {
   }
 
   async function copyApplication() {
-    if (!isComplete()) {
-      setStatus("Complete the required fields and acknowledgments before copying the application.");
-      return;
-    }
+    if (!validateApplication()) return;
 
     const body = buildApplication(form);
     try {
@@ -408,7 +423,7 @@ function LandingPage() {
               </div>
             </div>
 
-            <form className="application-form" onSubmit={prepareEmail}>
+            <form ref={formRef} className="application-form" onSubmit={prepareEmail}>
               <div className="form-grid">
                 <label>Organization name <em>*</em><input name="organization" value={form.organization} onChange={updateField} autoComplete="organization" required /></label>
                 <label>Contact name <em>*</em><input name="contactName" value={form.contactName} onChange={updateField} autoComplete="name" required /></label>
@@ -529,9 +544,79 @@ function CheckoutPaused() {
   );
 }
 
+function LegacyFulfillment({ checkoutRef }) {
+  const [downloadUrl, setDownloadUrl] = useState("");
+  const [paid, setPaid] = useState(false);
+  const [message, setMessage] = useState("Verifying the prior checkout and preparing your draft...");
+
+  useEffect(() => {
+    let active = true;
+    let attempts = 0;
+
+    async function poll() {
+      try {
+        const tokenResult = await createDownloadToken(checkoutRef);
+        if (tokenResult?.ok && tokenResult.token) {
+          const receipt = await receiptByToken(tokenResult.token);
+          if (active && receipt?.ok) {
+            setPaid(Boolean(receipt.paid));
+            setDownloadUrl(downloadUrlByToken(tokenResult.token));
+            setMessage("");
+            return;
+          }
+        }
+      } catch {
+        // A recently completed payment can take a short time to reach the backend.
+      }
+
+      attempts += 1;
+      if (active && attempts < 15) {
+        window.setTimeout(poll, 2000);
+      } else if (active) {
+        setMessage(`We could not verify this prior checkout automatically. Contact ${PILOT_EMAIL} and include your checkout reference.`);
+      }
+    }
+
+    poll();
+    return () => {
+      active = false;
+    };
+  }, [checkoutRef]);
+
+  return (
+    <div className="site legal-site">
+      <Header />
+      <main className="legal-main">
+        <div className="shell legal-shell">
+          <span className="eyebrow">Prior paid order</span>
+          <h1>Complete your existing delivery.</h1>
+          <div className="legal-card single-card" aria-live="polite">
+            {downloadUrl ? (
+              <>
+                <p>Your prior order has been located. Keep the delivery link for your records.</p>
+                <a className="button primary" href={downloadUrl}>Download draft PDF</a>
+                {!paid && <p className="form-note">Payment confirmation is still finalizing. The delivery link may require a brief refresh.</p>}
+              </>
+            ) : (
+              <>
+                <p>{message}</p>
+                <a className="button secondary" href={`mailto:${PILOT_EMAIL}`}>Contact GrantForgeUSA</a>
+              </>
+            )}
+          </div>
+        </div>
+      </main>
+      <Footer />
+    </div>
+  );
+}
+
 export default function App() {
   const path = typeof window === "undefined" ? "/" : window.location.pathname.replace(/\/$/, "") || "/";
   if (LEGAL_PAGES[path]) return <LegalPage page={LEGAL_PAGES[path]} />;
-  if (path === "/thanks") return <CheckoutPaused />;
+  if (path === "/thanks") {
+    const checkoutRef = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("ref") || "";
+    return checkoutRef ? <LegacyFulfillment checkoutRef={checkoutRef} /> : <CheckoutPaused />;
+  }
   return <LandingPage />;
 }
