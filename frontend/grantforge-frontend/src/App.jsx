@@ -16,7 +16,16 @@ const SUPPORT_EMAIL = (
   ["tylermerchantspc", "gmail.com"].join("@")
 ).trim();
 
-const SERVICE_FEE = "$2,500";
+const PRICE_RANGE = "$9.99–$199.99";
+
+function serviceFeeFor(category, annualBudget) {
+  if (String(category || "").toLowerCase() === "teacher (classroom)") return "$9.99";
+  const budget = Number(annualBudget);
+  if (!Number.isFinite(budget) || budget <= 0) return "Select your organization details";
+  if (budget <= 500000) return "$49.99";
+  if (budget <= 2000000) return "$99.99";
+  return "$199.99";
+}
 
 const INITIAL_FORM = {
   organization: "",
@@ -401,6 +410,7 @@ function LandingPage() {
   const [saleTerms, setSaleTerms] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
   const [checkingOut, setCheckingOut] = useState(false);
+  const serviceFee = serviceFeeFor(form.category, form.annualBudget);
 
   function updateField(event) {
     const { name, value, type, checked } = event.target;
@@ -604,8 +614,8 @@ function LandingPage() {
               <p>Complete the intake and compare your returned matches.</p>
               <hr />
               <span>Selected full proposal draft</span>
-              <strong>{SERVICE_FEE}</strong>
-              <p>Current drafting fee per selected opportunity. All sales final; no refunds except where required by law.</p>
+              <strong>{PRICE_RANGE}</strong>
+              <p>Teacher: $9.99 · Organizations ≤$500k: $49.99 · $500k–$2M: $99.99 · Over $2M: $199.99. All sales final except where required by law.</p>
             </div>
           </div>
         </section>
@@ -764,7 +774,7 @@ function LandingPage() {
                         )}
 
                         <div className="checkout-summary">
-                          <div><span>Selected draft</span><strong>{SERVICE_FEE}</strong></div>
+                          <div><span>Selected draft</span><strong>{serviceFee}</strong></div>
                           <p>Payment starts the full draft for the opportunity selected above.</p>
                         </div>
 
@@ -777,7 +787,7 @@ function LandingPage() {
 
                         {checkoutError && <div className="status-message error" role="alert">{checkoutError}</div>}
                         <button className="button primary full-width checkout-button" type="button" onClick={beginCheckout} disabled={checkingOut || previewing}>
-                          {checkingOut ? "Opening secure checkout…" : `Purchase full draft · ${SERVICE_FEE}`}
+                          {checkingOut ? "Opening secure checkout…" : `Purchase full draft · ${serviceFee}`}
                         </button>
                         <p className="checkout-fine-print">Secure card checkout. GrantForgeUSA does not guarantee funding or agency approval.</p>
                       </>

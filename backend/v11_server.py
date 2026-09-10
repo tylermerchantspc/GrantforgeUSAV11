@@ -54,8 +54,11 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(PROTECTED_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 
-# Pricing
-FLAT_PRICE = 2500.00
+# Public per-draft pricing
+TEACHER_PRICE = 9.99
+SMALL_ORG_PRICE = 49.99
+MEDIUM_ORG_PRICE = 99.99
+LARGE_ORG_PRICE = 199.99
 TOKEN_TTL_SECONDS = int(os.getenv("DOWNLOAD_TOKEN_TTL_SECONDS", str(24 * 60 * 60)))
 
 RATE_LIMITS = {
@@ -561,7 +564,14 @@ def _wrap_draw_line(
 
 
 def price_for(category: str, annual_budget: float) -> float:
-    return FLAT_PRICE
+    category_key = (category or "").strip().lower()
+    if category_key == "teacher (classroom)":
+        return TEACHER_PRICE
+    if annual_budget <= 500_000:
+        return SMALL_ORG_PRICE
+    if annual_budget <= 2_000_000:
+        return MEDIUM_ORG_PRICE
+    return LARGE_ORG_PRICE
 
 
 def fraud_check(category: str, amount: float) -> Dict[str, Any]:
