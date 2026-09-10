@@ -10,13 +10,20 @@ const htmlSource = fs.readFileSync(path.resolve(__dirname, "../index.html"), "ut
 const vercelSource = fs.readFileSync(path.resolve(__dirname, "../vercel.json"), "utf8");
 const robotsSource = fs.readFileSync(path.resolve(__dirname, "../public/robots.txt"), "utf8");
 
-test("soft-launch site has no active API or checkout dependency", () => {
-  assert.equal(appSource.includes("./fetcher"), false);
+test("soft-launch site has no active checkout creation flow", () => {
   assert.equal(appSource.includes("createCheckoutSession"), false);
   assert.equal(appSource.includes("Pay Now"), false);
   assert.equal(appSource.includes("$2,500"), false);
   assert.ok(appSource.includes("No payment is collected on this preview"));
   assert.ok(appSource.includes("Online checkout is paused"));
+});
+
+test("prior paid checkout returns preserve legacy fulfillment", () => {
+  assert.ok(appSource.includes("createDownloadToken"));
+  assert.ok(appSource.includes("receiptByToken"));
+  assert.ok(appSource.includes("downloadUrlByToken"));
+  assert.ok(appSource.includes("new URLSearchParams(window.location.search).get(\"ref\")"));
+  assert.ok(appSource.includes("Complete your existing delivery"));
 });
 
 test("planned pricing matches the approved pilot model", () => {
@@ -26,10 +33,13 @@ test("planned pricing matches the approved pilot model", () => {
   assert.ok(appSource.includes("No subscription"));
 });
 
-test("pilot application is local-first and requires acknowledgments", () => {
+test("pilot application is local-first and requires valid acknowledged input", () => {
   assert.ok(appSource.includes("mailto:"));
   assert.ok(appSource.includes("navigator.clipboard.writeText"));
   assert.ok(appSource.includes("This preview does not send or store the form"));
+  assert.ok(appSource.includes("checkValidity"));
+  assert.ok(appSource.includes("reportValidity"));
+  assert.ok(appSource.includes("Number(form.requestedAmount) > 0"));
   assert.ok(appSource.includes("funding is not guaranteed"));
   assert.ok(appSource.includes("official notice controls"));
   assert.ok(appSource.includes("consent"));
