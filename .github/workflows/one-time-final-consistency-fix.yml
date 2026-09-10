@@ -1,0 +1,78 @@
+name: One-time final consistency fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-final-consistency-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply final public-flow consistency fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          # Frontend receipt fallback: never display a legacy flat price.
+          app = Path('frontend/grantforge-frontend/src/App.jsx')
+          text = app.read_text(encoding='utf-8')
+          text = text.replace(
+              'formatMoney(receipt?.amount_total || 2500)',
+              'receipt?.amount_total ? formatMoney(receipt.amount_total) : "Paid"',
+              1,
+          )
+          app.write_text(text, encoding='utf-8')
+
+          # Fast Refresh lint: entry-file component is explicitly exported.
+          main = Path('frontend/grantforge-frontend/src/main.jsx')
+          text = main.read_text(encoding='utf-8')
+          text = text.replace('function ChristianIdentityBar() {', 'export function ChristianIdentityBar() {', 1)
+          main.write_text(text, encoding='utf-8')
+
+          # Remove stale FLAT_PRICE fallbacks left in receipt logic after tier pricing.
+          backend = Path('backend/v11_server.py')
+          text = backend.read_text(encoding='utf-8')
+          text = text.replace(
+              'float(md.get("price", FLAT_PRICE) or FLAT_PRICE)',
+              'float(md.get("price", 0) or 0)',
+          )
+          text = text.replace(
+              'row.get("price", FLAT_PRICE)',
+              'row.get("price", 0)',
+          )
+          backend.write_text(text, encoding='utf-8')
+
+          # Regression test webhook must simulate the current tier price, not $2,500.
+          tests = Path('backend/tests/test_v11_server.py')
+          text = tests.read_text(encoding='utf-8')
+          text = text.replace(
+              '"amount_total": 250000,',
+              '"amount_total": srv.cents(srv.price_for(payload["category"], payload["annualBudget"])),',
+              1,
+          )
+          tests.write_text(text, encoding='utf-8')
+
+      - name: Verify source consistency
+        run: |
+          python -m py_compile backend/v11_server.py backend/grantsgov_live.py backend/tests/test_v11_server.py
+          ! grep -q 'FLAT_PRICE' backend/v11_server.py
+          ! grep -q 'amount_total || 2500' frontend/grantforge-frontend/src/App.jsx
+          ! grep -q '"amount_total": 250000' backend/tests/test_v11_server.py
+          grep -q 'export function ChristianIdentityBar' frontend/grantforge-frontend/src/main.jsx
+      - name: Commit fixes
+        run: |
+          git config user.name 'GrantForgeUSA automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add frontend/grantforge-frontend/src/App.jsx frontend/grantforge-frontend/src/main.jsx backend/v11_server.py backend/tests/test_v11_server.py
+          git commit -m 'Finish public flow pricing and CI consistency'
+          git push origin main
