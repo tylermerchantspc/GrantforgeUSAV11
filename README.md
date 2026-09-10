@@ -65,4 +65,8 @@ Final scope is confirmed before an engagement begins. Multiple opportunities, ex
 
 GrantForgeUSA is an independent private service. Pilot work may use proprietary drafting software and automated tools for research organization, drafting, editing, and quality checks, followed by human review. The official funding notice controls. The applicant remains responsible for factual verification, registrations, attachments, certifications, signatures, deadlines, and final submission. Funding is never guaranteed.
 
-See [`docs/SOFT_LAUNCH_RUNBOOK.md`](docs/SOFT_LAUNCH_RUNBOOK.md) for the controlled operating sequence.
+Operational references:
+
+- [`docs/SOFT_LAUNCH_RUNBOOK.md`](docs/SOFT_LAUNCH_RUNBOOK.md) — controlled founding-pilot procedure;
+- [`docs/FULL_SERVICE_GATES.md`](docs/FULL_SERVICE_GATES.md) — mandatory go/no-go requirements;
+- [`docs/OPENAI_PRODUCTION_PLAN.md`](docs/OPENAI_PRODUCTION_PLAN.md) — current Responses API, model-routing, data-control, evaluation, and Codex implementation plan.
