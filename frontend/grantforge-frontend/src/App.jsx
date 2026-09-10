@@ -366,7 +366,7 @@ function ThankYouPage() {
               </p>
               <dl className="receipt-grid">
                 <div><dt>Order</dt><dd>{receipt?.order_id || "Confirmed"}</dd></div>
-                <div><dt>Amount</dt><dd>{formatMoney(receipt?.amount_total || 2500)}</dd></div>
+                <div><dt>Amount</dt><dd>{receipt?.amount_total ? formatMoney(receipt.amount_total) : "Paid"}</dd></div>
               </dl>
               <a className="button primary download-button" href={downloadUrlByToken(token)}>
                 Download full draft PDF
