@@ -76,12 +76,12 @@ test("technology is positioned as proprietary software without public AI brandin
 
 test("frontend API client contains the matching, preview, checkout, and delivery endpoints", () => {
   for (const endpoint of [
-    "/questionnaire",
-    "/preview",
-    "/create-checkout-session",
-    "/create-download-token",
-    "/receipt",
-    "/download-by-session",
+    'endpoint("questionnaire")',
+    'endpoint("preview")',
+    'endpoint("create-checkout-session")',
+    'endpoint("create-download-token")',
+    'endpoint("receipt")',
+    'endpoint("download-by-session")',
   ]) {
     assert.ok(fetcherSource.includes(endpoint), `missing ${endpoint}`);
   }
