@@ -19,6 +19,7 @@ if ROOT_DIR and ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from runtime_config import load_runtime_settings
+from backend.grantsgov_live import search_live_grants
 
 # PDF / data helpers
 from reportlab.lib.pagesizes import letter
@@ -894,14 +895,20 @@ def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
 
 def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     """
-    Turn intake into 0–3 strong matches from backend/data/grants.json.
-    Data quality lives in grants.json; logic lives here.
+    Turn intake into 0–3 ranked federal opportunities.
+    Production queries the live Grants.gov API first and uses the local dataset only as a resilient fallback.
     """
     payload = dict(payload or {})
     payload.pop("state", None)
     payload.pop("eligible_state", None)
 
     grants = _read_json(GRANTS_PATH) or []
+    if APP_MODE == "production" and os.getenv("LIVE_GRANTS_ENABLED", "true").lower() != "false":
+        live_query = (payload.get("keywords") or payload.get("projectTitle") or "").strip()
+        live_grants = search_live_grants(live_query) if live_query else []
+        if live_grants:
+            grants = live_grants
+
     category = payload.get("category") or payload.get("who") or ""
     amount = _safe_float(payload.get("amountRequested"))
     applicant_type = normalize_applicant_type(category)
@@ -953,6 +960,7 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
                     "tags": gr.get("tags", []),
                     "sector": gr.get("sector", ""),
                     "summary": gr.get("summary", ""),
+                    "source": gr.get("source", "GrantForgeUSA verified fallback dataset"),
                     "level": "Federal",
                 }
             )
