@@ -134,7 +134,7 @@ def _run_paid_pdf_flow(client, monkeypatch, payload):
                 "id": sid,
                 "metadata": sessions[sid]["metadata"],
                 "payment_status": "paid",
-                "amount_total": 250000,
+                "amount_total": srv.cents(srv.price_for(payload["category"], payload["annualBudget"])),
                 "currency": "usd",
                 "mode": "payment",
             }

@@ -1712,7 +1712,7 @@ def receipt():
                 "grant_program": md.get("grant_program", ""),
                 "session_id": session_id,
                 "session_url": "",
-                "price": float(md.get("price", FLAT_PRICE) or FLAT_PRICE),
+                "price": float(md.get("price", 0) or 0),
                 "pdf_path": "",
                 "paid": True,
             }
@@ -1723,7 +1723,7 @@ def receipt():
         {
             "ok": True,
             "order_id": row.get("order_id", ""),
-            "amount_total": row.get("price", FLAT_PRICE),
+            "amount_total": row.get("price", 0),
             "paid": True,
             "grant_title": row.get("grant_title", ""),
             "download_path": f"/download-by-session?token={token}",

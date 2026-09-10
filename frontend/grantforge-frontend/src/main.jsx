@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
-function ChristianIdentityBar() {
+export function ChristianIdentityBar() {
   return (
     <aside className="christian-identity-bar" aria-label="GrantForgeUSA Christian values statement">
       <div className="christian-identity-inner">
