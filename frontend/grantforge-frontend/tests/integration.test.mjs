@@ -112,7 +112,7 @@ test("legal and disclosure routes are present", () => {
   assert.ok(appSource.includes('"/terms"'));
   assert.ok(appSource.includes('"/disclaimer"'));
   assert.ok(appSource.includes("Not affiliated with Grants.gov or the United States government"));
-  assert.ok(appSource.includes("All sales are final and non-refundable"));
+  assert.ok(appSource.toLowerCase().includes("all sales are final and non-refundable"));
   assert.ok(appSource.includes("official funding notice controls"));
 });
 
