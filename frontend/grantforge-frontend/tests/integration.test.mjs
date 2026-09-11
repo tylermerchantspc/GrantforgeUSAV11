@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appSource = fs.readFileSync(path.resolve(__dirname, "../src/App.jsx"), "utf8");
 const fetcherSource = fs.readFileSync(path.resolve(__dirname, "../src/fetcher.js"), "utf8");
+const configSource = fs.readFileSync(path.resolve(__dirname, "../src/config.js"), "utf8");
 const htmlSource = fs.readFileSync(path.resolve(__dirname, "../index.html"), "utf8");
 const vercelSource = fs.readFileSync(path.resolve(__dirname, "../vercel.json"), "utf8");
 const robotsSource = fs.readFileSync(path.resolve(__dirname, "../public/robots.txt"), "utf8");
@@ -74,16 +75,26 @@ test("technology is positioned as proprietary software without public AI brandin
   assert.equal(/\bAI\b/.test(appSource), false);
 });
 
-test("frontend API client contains the matching, preview, checkout, and delivery endpoints", () => {
-  for (const endpoint of [
-    'endpoint("questionnaire")',
-    'endpoint("preview")',
-    'endpoint("create-checkout-session")',
-    'endpoint("create-download-token")',
-    'endpoint("receipt")',
-    'endpoint("download-by-session")',
+test("frontend API client contains matching, preview, checkout, and delivery wiring", () => {
+  for (const endpointKey of [
+    "ENDPOINTS.questionnaire",
+    "ENDPOINTS.preview",
+    "ENDPOINTS.checkout",
+    "ENDPOINTS.createDownloadToken",
+    "ENDPOINTS.receipt",
+    "ENDPOINTS.downloadBySession",
   ]) {
-    assert.ok(fetcherSource.includes(endpoint), `missing ${endpoint}`);
+    assert.ok(fetcherSource.includes(endpointKey), `missing ${endpointKey}`);
+  }
+  for (const route of [
+    "/questionnaire",
+    "/preview",
+    "/create-checkout-session",
+    "/create-download-token",
+    "/receipt",
+    "/download-by-session",
+  ]) {
+    assert.ok(configSource.includes(route), `missing ${route}`);
   }
   assert.ok(fetcherSource.includes("includeExpired: false"));
 });
