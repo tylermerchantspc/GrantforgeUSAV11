@@ -1317,7 +1317,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
             f"Project title: {payload.get('projectTitle', '')}",
             f"Applicant type: {payload.get('category', '')}",
             f"Requested amount: ${_safe_float(payload.get('amountRequested'), 0):,.2f}",
-            f"Service fee: ${FLAT_PRICE:,.2f}",
+            f"Service fee: ${_safe_float(payload.get('price'), 0):,.2f}",
             f"Recommended opportunity: {payload.get('grant_title', '')}",
         ]
         for line in summary_lines:
