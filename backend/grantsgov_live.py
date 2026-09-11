@@ -24,17 +24,21 @@ DETAIL_URL = f"{API_BASE}/fetchOpportunity"
 USER_AGENT = "GrantForgeUSA/11.6 (+https://grantforgeusa.com)"
 
 APPLICANT_ELIGIBILITY_CODES = {
-    "EDU_K12": ["05", "99"],
-    "HIGHER_ED": ["06", "20", "99"],
-    "NONPROFIT_501C3": ["12", "99"],
-    "NONPROFIT": ["12", "13", "99"],
-    "SMALL_BUSINESS": ["23", "99"],
-    "FOR_PROFIT": ["22", "99"],
-    "GOV_LOCAL": ["01", "02", "04", "99"],
-    "GOV_STATE": ["00", "99"],
-    "TRIBAL": ["07", "11", "99"],
-    "HOUSING": ["08", "99"],
-    "INDIVIDUAL": ["21", "99"],
+    # Include code 25 (Others) for recall because many notices place legitimate
+    # applicant types in Additional Information on Eligibility instead of a
+    # dedicated applicant code. The server-side eligibility gate must then
+    # positively confirm the applicant in that free-text field before sale.
+    "EDU_K12": ["05", "25", "99"],
+    "HIGHER_ED": ["06", "20", "25", "99"],
+    "NONPROFIT_501C3": ["12", "25", "99"],
+    "NONPROFIT": ["12", "13", "25", "99"],
+    "SMALL_BUSINESS": ["23", "25", "99"],
+    "FOR_PROFIT": ["22", "25", "99"],
+    "GOV_LOCAL": ["01", "02", "04", "25", "99"],
+    "GOV_STATE": ["00", "25", "99"],
+    "TRIBAL": ["07", "11", "25", "99"],
+    "HOUSING": ["08", "25", "99"],
+    "INDIVIDUAL": ["21", "25", "99"],
     "OTHER": ["25", "99"],
 }
 

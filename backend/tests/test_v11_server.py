@@ -365,3 +365,40 @@ def test_narrative_does_not_invent_default_outcomes_or_capacity():
     assert "20%" not in text and "70%" not in text and "90%" not in text
     assert "does not assume" in text
     assert "Applicant Validation Required Before Submission" in text
+
+
+
+def test_other_code_requires_free_text_confirmation_for_higher_ed():
+    allowed = {
+        "eligibility_codes": ["25"],
+        "eligibility_text": "Eligible applicants include public and private agencies and institutions, such as colleges and universities.",
+    }
+    unrelated = {
+        "eligibility_codes": ["25"],
+        "eligibility_text": "Eligible applicants are limited to state correctional agencies and federally recognized tribal governments.",
+    }
+    blank = {"eligibility_codes": ["25"], "eligibility_text": ""}
+    assert srv._is_eligible_for_applicant(allowed, "HIGHER_ED") is True
+    assert srv._is_eligible_for_applicant(unrelated, "HIGHER_ED") is False
+    assert srv._is_eligible_for_applicant(blank, "HIGHER_ED") is False
+
+
+def test_student_applicant_opportunities_are_out_of_scope_even_with_broad_codes():
+    student_only = {
+        "eligibility_codes": ["12", "20", "21", "99"],
+        "title": "Research Fellowship",
+        "summary": "The program is seeking proposals from current master and doctoral students enrolled at colleges or universities within the US to apply for an award.",
+    }
+    assert srv._student_applicant_opportunity(student_only) is True
+    assert srv._is_eligible_for_applicant(student_only, "HIGHER_ED") is False
+    assert srv._is_eligible_for_applicant(student_only, "INDIVIDUAL") is False
+
+
+def test_grants_serving_students_are_not_mistaken_for_student_applicant_programs():
+    institutional = {
+        "eligibility_codes": ["05"],
+        "title": "STEM Education Program",
+        "summary": "Independent school districts may apply for projects serving rural high-school students.",
+    }
+    assert srv._student_applicant_opportunity(institutional) is False
+    assert srv._is_eligible_for_applicant(institutional, "EDU_K12") is True

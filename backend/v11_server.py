@@ -893,8 +893,60 @@ def infer_client_sector(kws: List[str]) -> str:
     return ""
 
 
+def _student_applicant_opportunity(gr: Dict[str, Any]) -> bool:
+    """Return True only when the funding notice appears to require a student as applicant.
+
+    GrantForgeUSA intentionally does not offer student-aid or student-applicant services.
+    Generic grants that merely serve students are not excluded.
+    """
+    text = " ".join(
+        str(gr.get(key) or "")
+        for key in ("title", "eligibility_text", "summary")
+    ).lower()
+    if not text.strip():
+        return False
+
+    # Direct financial-aid / student-aid surfaces are always out of scope.
+    if any(term in text for term in ("fafsa", "federal pell grant", "student financial aid")):
+        return True
+
+    # Restrictive applicant language: the student is the applicant, not merely a beneficiary.
+    patterns = (
+        r"(?:seeking|invites?)\s+(?:applications?|proposals?)\s+from[^.]{0,180}\bstudents?\b",
+        r"\bapplicants?\b[^.]{0,100}\bmust\b[^.]{0,80}\bstudents?\b",
+        r"\bonly\b[^.]{0,80}\bstudents?\b[^.]{0,80}\b(?:apply|applicant)",
+        r"\bstudents?\b[^.]{0,140}\b(?:eligible to apply|may apply|to apply for)\b",
+    )
+    return any(re.search(pattern, text, flags=re.I) for pattern in patterns)
+
+
+def _eligibility_needles(applicant_type: str) -> Tuple[str, ...]:
+    return {
+        "EDU_K12": ("independent school district", "school district", "local education agency", "education agency", "k-12 school", "k12 school"),
+        "HIGHER_ED": ("institution of higher education", "institutions of higher education", "college", "colleges", "university", "universities", "higher education"),
+        "NONPROFIT_501C3": ("501(c)(3)", "501c3", "nonprofit", "non-profit"),
+        "NONPROFIT": ("nonprofit", "non-profit", "community-based organization", "community organization", "faith-based organization"),
+        "SMALL_BUSINESS": ("small business", "small businesses", "sbir", "sttr"),
+        "FOR_PROFIT": ("for-profit", "for profit", "commercial organization", "businesses"),
+        "GOV_LOCAL": ("local government", "county government", "city or township government", "municipality", "special district", "units of local government"),
+        "GOV_STATE": ("state government", "state governments", "state agency", "state agencies"),
+        "TRIBAL": ("tribal government", "tribal governments", "tribal organization", "tribal organizations", "indian tribe", "native american tribal"),
+        "HOUSING": ("public housing authority", "public housing authorities", "indian housing authority", "housing authority"),
+        "INDIVIDUAL": ("individual applicant", "individual applicants", "individuals"),
+        "OTHER": ("other eligible applicant", "other eligible applicants"),
+    }.get(applicant_type, ())
+
+
 def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
-    """Use official Grants.gov applicant codes first; fall back to normalized text for fixtures/legacy data."""
+    """Conservatively validate applicant eligibility against codes and free-text restrictions.
+
+    Explicit Grants.gov applicant codes are authoritative for the coded category. Code 25
+    (Others) is a recall mechanism only: the free-text eligibility must positively name the
+    applicant class. Student-applicant opportunities are always outside GrantForgeUSA scope.
+    """
+    if _student_applicant_opportunity(gr):
+        return False
+
     code_map = {
         "EDU_K12": {"05", "99"},
         "HIGHER_ED": {"06", "20", "99"},
@@ -907,36 +959,42 @@ def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
         "TRIBAL": {"07", "11", "99"},
         "HOUSING": {"08", "99"},
         "INDIVIDUAL": {"21", "99"},
-        "OTHER": {"25", "99"},
+        "OTHER": {"99"},
     }
-    codes = {str(code or "").strip().zfill(2) for code in (gr.get("eligibility_codes") or []) if str(code or "").strip()}
+    codes = {
+        str(code or "").strip().zfill(2)
+        for code in (gr.get("eligibility_codes") or [])
+        if str(code or "").strip()
+    }
+
+    # A dedicated eligible-applicant code (or unrestricted 99) is enough to pass this layer.
+    if codes & code_map.get(applicant_type, {"99"}):
+        return True
+
+    # 'Others' is intentionally NOT universal. Require positive evidence in the notice text.
+    if "25" in codes:
+        free_text = str(gr.get("eligibility_text") or "").lower()
+        if not free_text.strip():
+            return False
+        return any(term in free_text for term in _eligibility_needles(applicant_type))
+
+    # Legacy/offline fixtures may not carry numeric eligibility codes.
     if codes:
-        return bool(codes & code_map.get(applicant_type, {"99"}))
+        return False
+
     title = (gr.get("title") or "").lower()
     tags = " ".join(normalized_tags(gr.get("tags", [])))
     elig = " ".join(str(e).lower() for e in gr.get("eligible_types", []))
-    haystack = f"{title} {tags} {elig}"
+    free_text = str(gr.get("eligibility_text") or "").lower()
+    haystack = f"{title} {tags} {elig} {free_text}"
     if "unrestricted" in haystack:
         return True
     if "sbir" in haystack or "sttr" in haystack:
         return applicant_type == "SMALL_BUSINESS"
     if "cdbg" in haystack:
         return applicant_type == "GOV_LOCAL"
-    needles = {
-        "EDU_K12": ("school district", "school", "teacher", "educator", "k12", "classroom"),
-        "HIGHER_ED": ("higher education", "college", "university", "research institution"),
-        "NONPROFIT_501C3": ("501", "501(c)(3)", "nonprofit"),
-        "NONPROFIT": ("nonprofit", "community-based", "community organization", "faith-based"),
-        "SMALL_BUSINESS": ("small business", "startup", "microenterprise"),
-        "FOR_PROFIT": ("for-profit", "for profit", "commercial organization"),
-        "GOV_LOCAL": ("municipality", "city", "township", "county", "local government", "special district"),
-        "GOV_STATE": ("state government", "state agency"),
-        "TRIBAL": ("tribal government", "tribal organization", "native american"),
-        "HOUSING": ("public housing", "housing authority", "indian housing"),
-        "INDIVIDUAL": ("individual", "individual applicant"),
-        "OTHER": ("other",),
-    }
-    return any(term in haystack for term in needles.get(applicant_type, ()))
+    return any(term in haystack for term in _eligibility_needles(applicant_type))
+
 
 def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = None) -> Tuple[List[Dict[str, Any]], bool]:
     """
@@ -968,6 +1026,10 @@ def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = Non
     def build_rows(eligibility_required: bool) -> List[Dict[str, Any]]:
         built: List[Dict[str, Any]] = []
         for gr in grants:
+            # GrantForgeUSA does not sell student-aid or student-applicant services.
+            if _student_applicant_opportunity(gr):
+                continue
+
             # hide expired unless explicitly requested
             close_date = gr.get("close_date") or gr.get("deadline") or ""
             is_expired = _is_expired(close_date)
