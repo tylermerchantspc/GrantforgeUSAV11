@@ -37,10 +37,11 @@ jobs:
         run: npm run build
 
   backend:
-    name: Legacy backend regression tests
+    name: Backend regression tests
     runs-on: ubuntu-latest
     env:
       APP_MODE: development
+      LIVE_GRANTS_ENABLED: "false"
       STRIPE_SECRET_KEY: sk_test_ci_placeholder
       STRIPE_PUBLISHABLE_KEY: pk_test_ci_placeholder
     steps:
