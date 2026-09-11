@@ -1,0 +1,28 @@
+name: One-time actionable opportunity and deadline guardrails
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-actionable-deadline-guardrails.yml'
+permissions:
+  contents: write
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply actionable/deadline patch
+        run: python scripts/one_time_actionable_deadline_guardrails.py
+      - name: Validate backend syntax
+        run: python -m py_compile backend/v11_server.py backend/tests/test_v11_server.py
+      - name: Commit application changes
+        run: |
+          git config user.name "GrantForgeUSA automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/v11_server.py backend/tests/test_v11_server.py
+          git commit -m "Reject informational notices and stale prose deadlines"
+          git push origin HEAD:main
