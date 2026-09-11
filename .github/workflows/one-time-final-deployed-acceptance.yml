@@ -1,0 +1,139 @@
+name: One-time final deployed acceptance
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-final-deployed-acceptance.yml'
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exercise deployed GrantForgeUSA release candidate
+        env:
+          BASE_URL: https://grantforgeusa-v11-backend.onrender.com
+        run: |
+          python - <<'PY'
+          import json, os, time
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+
+          base = os.environ['BASE_URL'].rstrip('/')
+
+          def get(path, attempts=5):
+              last = None
+              for i in range(attempts):
+                  try:
+                      with urlopen(base + path, timeout=30) as r:
+                          return r.status, json.loads(r.read().decode())
+                  except Exception as exc:
+                      last = exc
+                      time.sleep(8 + i * 4)
+              raise RuntimeError(f'GET {path} failed: {last}')
+
+          def post(path, payload, attempts=3):
+              body = json.dumps(payload).encode()
+              last = None
+              for i in range(attempts):
+                  req = Request(base + path, data=body, headers={'Content-Type':'application/json'}, method='POST')
+                  try:
+                      with urlopen(req, timeout=45) as r:
+                          return r.status, json.loads(r.read().decode())
+                  except HTTPError as exc:
+                      raw = exc.read().decode(errors='replace')
+                      try: data = json.loads(raw)
+                      except Exception: data = {'raw': raw}
+                      return exc.code, data
+                  except Exception as exc:
+                      last = exc
+                      time.sleep(8 + i * 4)
+              raise RuntimeError(f'POST {path} failed: {last}')
+
+          status, health = get('/get/health')
+          print('HEALTH', status, health)
+          assert status == 200 and health.get('ok') is True
+          assert str(health.get('mode','')).lower() == 'test', f"Stripe/app mode must remain test for human acceptance: {health}"
+
+          positive = {
+              'organization':'Prairie State University',
+              'category':'College / University / Research Institution',
+              'state':'Minnesota',
+              'annualBudget':50000000,
+              'projectTitle':'Rural Agricultural STEM Career Pathways',
+              'amountRequested':150000,
+              'timeline':'12 months',
+              'audience':'Rural K-14 students in southern Minnesota interested in agricultural science and engineering careers',
+              'keywords':'STEM, agriculture, rural youth, agricultural science, engineering, careers, experiential learning',
+              'need':'Rural K-14 students have limited access to hands-on agricultural science, engineering, mentoring, and career pathway experiences.',
+              'notes':'University faculty and extension educators will work with secondary and community-college partners on experiential agricultural STEM learning and mentoring.'
+          }
+
+          # Render may still be rolling the latest backend commit. Wait until the known
+          # current USDA-NIFA opportunity passes the stricter code-25/free-text gate.
+          results = []
+          data = {}
+          for attempt in range(8):
+              st, data = post('/questionnaire', positive)
+              assert st == 200 and data.get('ok') is True, (st, data)
+              results = data.get('results') or []
+              print('POSITIVE ATTEMPT', attempt + 1, [(r.get('opp_id'), r.get('title'), r.get('fit')) for r in results])
+              if any(str(r.get('opp_id')) == '363818' or r.get('opp_number') == 'USDA-NIFA-WAMS-011117' for r in results):
+                  break
+              time.sleep(15)
+          target = next((r for r in results if str(r.get('opp_id')) == '363818' or r.get('opp_number') == 'USDA-NIFA-WAMS-011117'), None)
+          assert target, f'Expected current USDA-NIFA STEM opportunity not surfaced: {data}'
+          assert target.get('purchasable') is True
+          assert target.get('fit') in ('Strong Match','Possible Match')
+          assert float(target.get('min_amount') or 0) <= 150000 <= float(target.get('max_amount') or 10**12)
+          assert target.get('source') == 'Grants.gov live API'
+          assert target.get('cost_sharing_required') is True, target
+
+          selected = dict(positive)
+          selected['grant'] = target
+          st, preview = post('/preview', selected)
+          print('PREVIEW', st, preview)
+          assert st == 200 and preview.get('ok') is True, (st, preview)
+          text = preview.get('summary') or ''
+          lower = text.lower()
+          assert 'prairie state university' in lower
+          assert 'cost sharing or matching is required' in lower
+          for invented in ('20% engagement','70% proficiency','90% milestone'):
+              assert invented not in lower
+
+          st, checkout = post('/create-checkout-session', selected)
+          print('CHECKOUT', st, {k:v for k,v in checkout.items() if k != 'url'})
+          assert st == 200 and checkout.get('ok') is True, (st, checkout)
+          assert str(checkout.get('url','')).startswith('https://checkout.stripe.com/'), checkout
+          assert checkout.get('checkoutReference')
+
+          negative_cases = [
+              ('MEMORIAL', {
+                  'organization':'Martin County Veterans','category':'501(c)(3) Nonprofit','state':'Minnesota','annualBudget':90000,
+                  'projectTitle':'Purple Heart Statue','amountRequested':50000,'timeline':'May 2027',
+                  'audience':'Local veterans and travelers to Martin County','keywords':'memorial, veterans, park',
+                  'need':'Install a memorial at the county veterans park recognizing the cost of war.','notes':'Local veterans organizations may assist.'
+              }),
+              ('ROBOTICS', {
+                  'organization':'Prairie Ridge Middle School','category':'K-12 School / District / Educator','state':'Minnesota','annualBudget':120000,
+                  'projectTitle':'Rural Robotics Discovery Lab','amountRequested':18000,'timeline':'2026-2027 school year',
+                  'audience':'Middle school students','keywords':'STEM, robotics, classroom technology, equipment',
+                  'need':'Expand hands-on robotics and engineering learning.','notes':'School-based instructional project.'
+              }),
+              ('ENERGY', {
+                  'organization':'North Star Fabrication LLC','category':'Small Business','state':'Minnesota','annualBudget':380000,
+                  'projectTitle':'Rural Manufacturing Energy Upgrade','amountRequested':90000,'timeline':'12 months',
+                  'audience':'Manufacturing employees and customers','keywords':'small business, rural energy, energy efficiency, manufacturing',
+                  'need':'Reduce energy use in a rural manufacturing operation.','notes':'Equipment efficiency and operational improvements.'
+              }),
+          ]
+          forbidden = ('advancing oil and natural gas production','advanced nuclear energy licensing','radioactive materials transportation')
+          for label, payload in negative_cases:
+              st, out = post('/questionnaire', payload)
+              assert st == 200 and out.get('ok') is True, (label, st, out)
+              blob = json.dumps(out).lower()
+              print(label, [(r.get('title'), r.get('fit')) for r in (out.get('results') or [])])
+              for phrase in forbidden:
+                  assert phrase not in blob, (label, phrase, out)
+
+          print('FINAL_DEPLOYED_ACCEPTANCE_PASS')
+          PY
