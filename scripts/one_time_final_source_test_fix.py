@@ -25,12 +25,6 @@ if old not in s:
     raise SystemExit('Expected shortlist source block not found')
 p.write_text(s.replace(old, new))
 
-p = Path('.github/workflows/ci.yml')
-s = p.read_text()
-if 'LIVE_GRANTS_ENABLED' not in s:
-    s = s.replace('      APP_MODE: development\n', '      APP_MODE: development\n      LIVE_GRANTS_ENABLED: "false"\n')
-p.write_text(s)
-
 p = Path('backend/tests/test_v11_server.py')
 s = p.read_text()
 if 'os.environ.setdefault("LIVE_GRANTS_ENABLED", "false")' not in s:
