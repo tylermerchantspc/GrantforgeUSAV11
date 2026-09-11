@@ -1,0 +1,147 @@
+name: One-time three-client acceptance
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-three-client-acceptance.yml'
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Run three fictional customer journeys
+        env:
+          APP_MODE: test
+          OUTPUT_DIR: /tmp/grantforge_acceptance
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          import requests
+          from backend.v11_server import build_narrative
+
+          BASE = "https://grantforgeusa-v11-backend.onrender.com"
+          cases = [
+              {
+                  "case": "teacher",
+                  "price": 9.99,
+                  "intake": {
+                      "organization": "Prairie Ridge Middle School Classroom",
+                      "contactName": "Amanda Cole",
+                      "contactEmail": "amanda.cole@example.com",
+                      "zip": "56031",
+                      "category": "Teacher (Classroom)",
+                      "annualBudget": 120000,
+                      "amountRequested": 18000,
+                      "projectTitle": "Rural Robotics Discovery Lab",
+                      "keywords": "STEM, robotics, technology, equipment",
+                      "timeline": "2026-2027 school year",
+                      "audience": "grades 6-8 students in a rural public school",
+                      "need": "Students have limited access to hands-on robotics, coding equipment, and project-based STEM experiences that connect classroom learning to technical careers.",
+                      "notes": "The classroom plans weekly robotics labs, student team challenges, teacher professional development, and simple pre/post skill measures."
+                  }
+              },
+              {
+                  "case": "nonprofit",
+                  "price": 99.99,
+                  "intake": {
+                      "organization": "River Valley Youth Works",
+                      "contactName": "Marcus Green",
+                      "contactEmail": "marcus.green@example.org",
+                      "zip": "56001",
+                      "category": "501c3 Nonprofit",
+                      "annualBudget": 760000,
+                      "amountRequested": 125000,
+                      "projectTitle": "Rural Youth Apprenticeship Bridge",
+                      "keywords": "workforce, apprenticeship, rural youth, training",
+                      "timeline": "18 months",
+                      "audience": "low-income rural youth ages 16-24",
+                      "need": "Young adults in the service area face transportation, employer-access, and skills barriers that make it difficult to enter registered apprenticeships and stable career pathways.",
+                      "notes": "The nonprofit will coordinate employer partners, work-readiness training, transportation support, mentoring, and measurable placement and retention outcomes."
+                  }
+              },
+              {
+                  "case": "small_business",
+                  "price": 49.99,
+                  "intake": {
+                      "organization": "North Star Fabrication LLC",
+                      "contactName": "Daniel Brooks",
+                      "contactEmail": "daniel.brooks@example.com",
+                      "zip": "56101",
+                      "category": "Small Business",
+                      "annualBudget": 380000,
+                      "amountRequested": 90000,
+                      "projectTitle": "Rural Manufacturing Energy Upgrade",
+                      "keywords": "small business, rural energy, energy efficiency, manufacturing",
+                      "timeline": "12 months",
+                      "audience": "employees and customers of a rural metal fabrication business",
+                      "need": "The company operates older fabrication and ventilation equipment that increases energy costs and limits production efficiency in a rural community.",
+                      "notes": "The project would replace inefficient equipment, improve ventilation and controls, document energy savings, and preserve skilled rural jobs."
+                  }
+              },
+          ]
+
+          results = []
+          health = requests.get(f"{BASE}/get/health", timeout=60)
+          health.raise_for_status()
+
+          for item in cases:
+              intake = dict(item["intake"])
+              response = requests.post(
+                  f"{BASE}/questionnaire",
+                  json={"includeExpired": False, **intake},
+                  timeout=90,
+              )
+              response.raise_for_status()
+              payload = response.json()
+              grants = payload.get("results") or []
+              if not grants:
+                  raise SystemExit(f"{item['case']}: no grants returned")
+              selected = grants[0]
+
+              preview_response = requests.post(
+                  f"{BASE}/preview",
+                  json={**intake, "grant": selected},
+                  timeout=90,
+              )
+              preview_response.raise_for_status()
+              preview_payload = preview_response.json()
+              if not preview_payload.get("ok") or not preview_payload.get("summary"):
+                  raise SystemExit(f"{item['case']}: preview failed: {preview_payload}")
+
+              narrative = build_narrative(intake, selected)
+              if len(narrative) < 1800:
+                  raise SystemExit(f"{item['case']}: narrative unexpectedly short")
+
+              results.append({
+                  "case": item["case"],
+                  "price": item["price"],
+                  "intake": intake,
+                  "selected_grant": selected,
+                  "recommendations": [
+                      {
+                          "title": g.get("title", ""),
+                          "program_url": g.get("program_url") or g.get("official_url") or "",
+                          "fit": g.get("fit"),
+                          "score": g.get("score"),
+                          "deadline": g.get("deadline"),
+                          "max_amount": g.get("max_amount"),
+                      }
+                      for g in grants
+                  ],
+                  "preview": preview_payload.get("summary", ""),
+                  "narrative": narrative,
+              })
+              time.sleep(1)
+
+          print("GF_ACCEPTANCE_RESULT_BEGIN")
+          print(json.dumps({"health": health.json(), "cases": results}, separators=(",", ":")))
+          print("GF_ACCEPTANCE_RESULT_END")
+          PY
