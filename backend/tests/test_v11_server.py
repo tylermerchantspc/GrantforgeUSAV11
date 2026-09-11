@@ -442,3 +442,11 @@ def test_narrative_flags_required_cost_sharing_without_inventing_percentage():
     text = srv.build_narrative(payload, grant)
     assert "cost sharing or matching is required" in text
     assert "must be verified" in text
+
+
+def test_agriculture_sector_precedes_generic_stem_or_workforce_terms():
+    kws = srv.normalized_keywords("STEM, agriculture, rural youth, agricultural science, engineering, careers")
+    assert srv.infer_client_sector(kws) == "agriculture / rural development"
+
+def test_flat_price_remains_4999_after_sector_routing_changes():
+    assert srv.price_for("College / University / Research Institution", 50000000) == pytest.approx(49.99)

@@ -817,6 +817,20 @@ def infer_client_sector(kws: List[str]) -> str:
     keyword_blob = " ".join(kws)
     sector_rules = [
         (
+            "agriculture / rural development",
+            [
+                "agriculture",
+                "agricultural",
+                "farming",
+                "farm operation",
+                "ranching",
+                "food systems",
+                "agricultural science",
+                "agricultural education",
+                "rural development",
+            ],
+        ),
+        (
             "energy / manufacturing efficiency",
             ["energy efficiency", "rural energy", "energy", "ventilation", "efficiency", "manufacturing equipment"],
         ),
@@ -1588,7 +1602,7 @@ def create_checkout_session():
         "keywords": (data.get("keywords") or "").strip(),
         "state": (data.get("state") or data.get("eligible_state") or "").strip(),
         "price": f"{price:.2f}",
-        "refund_policy": "All sales final. No refunds.",
+        "refund_policy": "Final once customized generation begins; exceptions required by law or nondelivery.",
         "requester_ip": _client_ip(),
     }
 
