@@ -6,6 +6,7 @@ import pytest
 
 os.environ.setdefault("STRIPE_SECRET_KEY", "sk_test_dummy")
 os.environ.setdefault("STRIPE_PUBLISHABLE_KEY", "pk_test_dummy")
+os.environ.setdefault("LIVE_GRANTS_ENABLED", "false")
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "v11_server.py"
 spec = importlib.util.spec_from_file_location("v11_server", MODULE_PATH)
@@ -90,8 +91,38 @@ def test_narrative_uses_senior_sections():
     assert "Sustainability" in text
 
 
+def _purchase_ready_grant(payload):
+    return {
+        "title": "Workforce Innovation Demonstration Grant",
+        "program": "Federal Workforce Program",
+        "program_url": "https://www.grants.gov/opportunity/details/TEST-2027-001",
+        "official_url": "https://www.grants.gov/opportunity/details/TEST-2027-001",
+        "opp_number": "TEST-2027-001",
+        "deadline": "2027-12-31",
+        "min_amount": 10000,
+        "max_amount": 500000,
+        "fit": "Strong Match",
+        "score": 150,
+        "fit_notes": "Eligibility, project purpose, geography, and funding range align.",
+        "purchasable": True,
+        "requires_match_percent": 0,
+        "tags": ["workforce", "youth", "community"],
+        "sector": "workforce development",
+        "summary": "Test fixture for secure checkout and PDF lifecycle regression coverage.",
+        "source": "Test fixture",
+        "level": "Federal",
+    }
+
+
+def _mock_purchase_ready_shortlist(monkeypatch, payload):
+    grant = _purchase_ready_grant(payload)
+    monkeypatch.setattr(srv, "shortlist", lambda data: ([dict(grant)], True))
+    return grant
+
+
 def _run_paid_pdf_flow(client, monkeypatch, payload):
     sessions = _mock_checkout(monkeypatch)
+    _mock_purchase_ready_shortlist(monkeypatch, payload)
 
     invalid = dict(payload)
     invalid["audience"] = ""
@@ -197,6 +228,7 @@ def test_receipt_requires_paid_session(client, monkeypatch):
     monkeypatch.setattr(srv.stripe.checkout.Session, "create", create_unpaid)
 
     payload = _payload("Unpaid Org", "housing, resilience", "501c3 Nonprofit")
+    _mock_purchase_ready_shortlist(monkeypatch, payload)
     recs = client.post("/questionnaire", json=payload).get_json()["results"]
     checkout = client.post(
         "/create-checkout-session",
@@ -213,6 +245,7 @@ def test_receipt_requires_paid_session(client, monkeypatch):
 def test_session_cannot_be_reused_after_download(client, monkeypatch):
     payload = _payload("ReUse Block Org", "workforce, youth", "Church / Faith Org")
     sessions = _mock_checkout(monkeypatch)
+    _mock_purchase_ready_shortlist(monkeypatch, payload)
     recs = client.post("/questionnaire", json=payload).get_json()["results"]
     checkout = client.post(
         "/create-checkout-session",
@@ -251,6 +284,7 @@ def test_grant_url_validation_allows_only_official_grants_domain():
 def test_download_token_rejects_non_owner_ip(client, monkeypatch):
     _mock_checkout(monkeypatch)
     payload = _payload("Ownership Org", "workforce, youth", "501c3 Nonprofit")
+    _mock_purchase_ready_shortlist(monkeypatch, payload)
     recs = client.post("/questionnaire", json=payload).get_json()["results"]
     checkout = client.post(
         "/create-checkout-session",
@@ -282,3 +316,29 @@ def test_funding_range_is_hard_gate():
     assert srv._funding_range_compatible(grant, 90000)[0] is False
     assert srv._funding_range_compatible(grant, 200000)[0] is True
     assert srv._funding_range_compatible(grant, 500000)[0] is False
+
+
+def test_state_is_required(client):
+    payload = _payload("State Required Org", "workforce, youth", "501c3 Nonprofit")
+    payload.pop("state")
+    response = client.post("/questionnaire", json=payload)
+    assert response.status_code == 400
+    assert "state" in response.get_json()["error"].lower()
+
+
+def test_low_match_cannot_be_purchased(client, monkeypatch):
+    payload = _payload("Low Match Org", "workforce, youth", "501c3 Nonprofit")
+    low = _purchase_ready_grant(payload)
+    low.update({"fit": "Low Match", "score": 70, "purchasable": False})
+    monkeypatch.setattr(srv, "shortlist", lambda data: ([], False))
+    response = client.post("/create-checkout-session", json={**payload, "grant": low})
+    assert response.status_code == 422
+
+
+def test_live_source_failure_does_not_fall_back(monkeypatch):
+    payload = _payload("Live Source Org", "workforce, youth", "501c3 Nonprofit")
+    monkeypatch.setenv("LIVE_GRANTS_ENABLED", "true")
+    monkeypatch.setattr(srv, "search_live_grants", lambda *args, **kwargs: [])
+    results, has_strong = srv.shortlist(payload)
+    assert results == []
+    assert has_strong is False

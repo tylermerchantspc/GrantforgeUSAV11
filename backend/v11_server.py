@@ -946,9 +946,8 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     requested_sector = infer_client_sector(kws)
     state_value = payload.get("state") or payload.get("eligible_state") or ""
 
-    if APP_MODE == "production":
-        if os.getenv("LIVE_GRANTS_ENABLED", "true").lower() == "false":
-            return [], False
+    live_grants_enabled = os.getenv("LIVE_GRANTS_ENABLED", "true").lower() != "false"
+    if live_grants_enabled:
         live_query = " ".join(filter(None, [payload.get("projectTitle", ""), payload.get("keywords", "")])).strip()
         grants = search_live_grants(live_query, applicant_type=applicant_type, sector=requested_sector) if live_query else []
         if not grants:
