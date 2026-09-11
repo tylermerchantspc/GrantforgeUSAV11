@@ -58,8 +58,8 @@ async function safeFetch(url, options = {}, { timeoutMs = 20000 } = {}) {
 /* ---------- API wrappers ---------- */
 
 export async function shortlist(payload) {
-  // includeExpired forced false from frontend for now
-  const body = JSON.stringify({ includeExpired: false, ...(payload || {}) });
+  // Expired opportunities are never requested by the public frontend.
+  const body = JSON.stringify({ ...(payload || {}), includeExpired: false });
   return safeFetch(ENDPOINTS.questionnaire, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
