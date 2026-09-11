@@ -1,0 +1,149 @@
+name: One-time GrantForge quality gate patch
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-quality-gate-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply customer-quality gates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          backend = Path('backend/v11_server.py')
+          text = backend.read_text()
+
+          text = text.replace(
+              '        if k in ("state", "eligible_state", "phone", "phoneNumber"):\n            continue\n',
+              '        if k in ("phone", "phoneNumber"):\n            continue\n'
+          )
+          text = text.replace(
+              '        "session_id",\n    }',
+              '        "session_id",\n        "state",\n        "eligible_state",\n    }'
+          )
+          text = text.replace(
+              '        "audience": (data.get("audience") or "").strip(),\n    }',
+              '        "audience": (data.get("audience") or "").strip(),\n        "state": (data.get("state") or data.get("eligible_state") or "").strip(),\n    }'
+          )
+          text = text.replace(
+              '            "audience": "audience",\n        }',
+              '            "audience": "audience",\n            "state": "state",\n        }'
+          )
+
+          marker = 'def score_grant(\n'
+          insert = '''US_STATE_NAMES = {\n    "AL": "alabama", "AK": "alaska", "AZ": "arizona", "AR": "arkansas",\n    "CA": "california", "CO": "colorado", "CT": "connecticut", "DE": "delaware",\n    "FL": "florida", "GA": "georgia", "HI": "hawaii", "ID": "idaho",\n    "IL": "illinois", "IN": "indiana", "IA": "iowa", "KS": "kansas",\n    "KY": "kentucky", "LA": "louisiana", "ME": "maine", "MD": "maryland",\n    "MA": "massachusetts", "MI": "michigan", "MN": "minnesota", "MS": "mississippi",\n    "MO": "missouri", "MT": "montana", "NE": "nebraska", "NV": "nevada",\n    "NH": "new hampshire", "NJ": "new jersey", "NM": "new mexico", "NY": "new york",\n    "NC": "north carolina", "ND": "north dakota", "OH": "ohio", "OK": "oklahoma",\n    "OR": "oregon", "PA": "pennsylvania", "RI": "rhode island", "SC": "south carolina",\n    "SD": "south dakota", "TN": "tennessee", "TX": "texas", "UT": "utah",\n    "VT": "vermont", "VA": "virginia", "WA": "washington", "WV": "west virginia",\n    "WI": "wisconsin", "WY": "wyoming", "DC": "district of columbia",\n}\n\nARC_STATES = {"AL", "GA", "KY", "MD", "MS", "NY", "NC", "OH", "PA", "SC", "TN", "VA", "WV"}\n\ndef _normalize_state(value: str) -> str:\n    raw = (value or "").strip().lower()\n    if not raw:\n        return ""\n    for code, name in US_STATE_NAMES.items():\n        if raw == code.lower() or raw == name:\n            return code\n    return raw.upper() if len(raw) == 2 else ""\n\ndef _geography_compatible(gr: Dict[str, Any], state_value: str) -> Tuple[bool, str]:\n    state = _normalize_state(state_value)\n    if not state:\n        return False, "State is required to verify geographic eligibility."\n    blob = " ".join([\n        str(gr.get("title") or ""),\n        str(gr.get("program") or ""),\n        str(gr.get("agency") or ""),\n        str(gr.get("eligibility_text") or ""),\n    ]).lower()\n    if "appalachian regional commission" in blob or re.search(r"\\barc\\b", blob):\n        if state not in ARC_STATES:\n            return False, "Applicant state is outside the Appalachian Regional Commission service area."\n    return True, ""\n\ndef _funding_range_compatible(gr: Dict[str, Any], amount: float) -> Tuple[bool, str]:\n    minimum = _safe_float(gr.get("min_amount"), 0.0)\n    maximum = _safe_float(gr.get("max_amount"), 0.0)\n    if minimum > 0 and amount < minimum:\n        return False, f"Requested amount (${amount:,.0f}) is below this opportunity's minimum (${minimum:,.0f})."\n    if maximum > 0 and amount > maximum:\n        return False, f"Requested amount (${amount:,.0f}) exceeds this opportunity's maximum (${maximum:,.0f})."\n    return True, ""\n\ndef _purchaseable_fit(gr: Dict[str, Any]) -> bool:\n    return gr.get("fit") in ("Strong Match", "Possible Match") and bool(gr.get("purchasable"))\n\ndef _grant_key(gr: Dict[str, Any]) -> str:\n    return _first_identifier(gr, "opp_id", "opportunity_id", "opp_number", "opportunity_number") or str(gr.get("title") or "").strip().lower()\n\n'''
+          if insert not in text:
+              text = text.replace(marker, insert + marker)
+
+          text = text.replace(
+              '    grants = _read_json(GRANTS_PATH) or []\n    if APP_MODE == "production" and os.getenv("LIVE_GRANTS_ENABLED", "true").lower() != "false":\n        live_query = (payload.get("keywords") or payload.get("projectTitle") or "").strip()\n        live_grants = search_live_grants(live_query) if live_query else []\n        if live_grants:\n            grants = live_grants\n\n    category = payload.get("category") or payload.get("who") or ""\n    amount = _safe_float(payload.get("amountRequested"))\n    applicant_type = normalize_applicant_type(category)\n    kws = normalized_keywords(payload.get("keywords", ""))\n',
+              '    category = payload.get("category") or payload.get("who") or ""\n    amount = _safe_float(payload.get("amountRequested"))\n    applicant_type = normalize_applicant_type(category)\n    kws = normalized_keywords(payload.get("keywords", ""))\n    requested_sector = infer_client_sector(kws)\n    state_value = payload.get("state") or payload.get("eligible_state") or ""\n\n    if APP_MODE == "production":\n        if os.getenv("LIVE_GRANTS_ENABLED", "true").lower() == "false":\n            return [], False\n        live_query = " ".join(filter(None, [payload.get("projectTitle", ""), payload.get("keywords", "")])).strip()\n        grants = search_live_grants(live_query, applicant_type=applicant_type, sector=requested_sector) if live_query else []\n        if not grants:\n            return [], False\n    else:\n        grants = _read_json(GRANTS_PATH) or []\n'
+          )
+
+          text = text.replace(
+              '            if eligibility_required and not _is_eligible_for_applicant(\n                gr, applicant_type\n            ):\n                continue\n\n            s = score_grant(gr, category, kws, amount)\n\n            url = grant_display_url(gr)\n',
+              '            if eligibility_required and not _is_eligible_for_applicant(gr, applicant_type):\n                continue\n\n            geography_ok, geography_note = _geography_compatible(gr, state_value)\n            funding_ok, funding_note = _funding_range_compatible(gr, amount)\n            if not geography_ok or not funding_ok:\n                continue\n\n            s = score_grant(gr, category, kws, amount)\n            purchasable = s["fit"] in ("Strong Match", "Possible Match")\n\n            url = grant_display_url(gr)\n'
+          )
+          text = text.replace(
+              '                    "fit_notes": s["fit_notes"],\n',
+              '                    "fit_notes": s["fit_notes"],\n                    "purchasable": purchasable,\n                    "screening_notes": " ".join(n for n in (geography_note, funding_note) if n),\n                    "min_amount": _safe_float(gr.get("min_amount"), 0),\n'
+          )
+          text = text.replace(
+              '    strong_rows = [\n        r for r in rows if r.get("fit") in ("Strong Match", "Possible Match")\n    ]\n    has_strong_matches = len(strong_rows) > 0\n    if len(strong_rows) >= 3:\n        federal_rows = strong_rows[:3]\n    else:\n        federal_rows = rows[:3]\n\n    return federal_rows, has_strong_matches\n',
+              '    viable_rows = [r for r in rows if _purchaseable_fit(r)]\n    has_strong_matches = any(r.get("fit") == "Strong Match" for r in viable_rows)\n    return viable_rows[:3], has_strong_matches\n'
+          )
+
+          text = text.replace(
+              '    if not has_strong_matches and results:\n        notice = "No direct federal matches found. Showing closest opportunities."\n',
+              '    if results and not has_strong_matches:\n        notice = "Potential federal matches found. Review the fit notes and official notice carefully before purchasing."\n    elif not results:\n        notice = "No purchase-ready federal opportunity matched the information provided. Refine the project details, funding request, or search terms and try again."\n'
+          )
+
+          old_preview = '''    grant = data.get("grant") or {}\n    if not grant:\n        short, _ = shortlist(data)\n        if short:\n            grant = short[0]\n\n    # Build full draft, then shorten for preview\n    full_draft = build_narrative(data, grant)\n'''
+          new_preview = '''    requested_grant = data.get("grant") or {}\n    short, _ = shortlist(data)\n    if not short:\n        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422\n    grant = short[0]\n    if requested_grant:\n        requested_key = _grant_key(requested_grant)\n        grant = next((item for item in short if _grant_key(item) == requested_key), {})\n        if not grant:\n            return jsonify(ok=False, error="This opportunity no longer passes GrantForgeUSA screening for the submitted intake."), 422\n\n    # Build full draft, then shorten for preview\n    full_draft = build_narrative(data, grant)\n'''
+          text = text.replace(old_preview, new_preview)
+
+          checkout_marker = '    grant = data.get("grant") or {}\n\n    chk = fraud_check(category, amount_req)\n'
+          checkout_replacement = '''    requested_grant = data.get("grant") or {}\n\n    chk = fraud_check(category, amount_req)\n'''
+          text = text.replace(checkout_marker, checkout_replacement)
+          validation_insert = '''    short, _ = shortlist(data)\n    if not short:\n        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422\n    requested_key = _grant_key(requested_grant)\n    grant = next((item for item in short if _grant_key(item) == requested_key), {})\n    if not grant or not _purchaseable_fit(grant):\n        return jsonify(ok=False, error="Selected opportunity does not pass GrantForgeUSA purchase screening for this intake."), 422\n\n'''
+          text = text.replace(
+              '    max_amt = _safe_float(grant.get("max_amount"), 0)\n',
+              validation_insert + '    max_amt = _safe_float(grant.get("max_amount"), 0)\n',
+              1
+          )
+
+          # Keep state available to narrative and checkout metadata.
+          text = text.replace('    intake.pop("state", None)\n    intake.pop("eligible_state", None)\n\n', '')
+          text = text.replace(
+              '        "keywords": (data.get("keywords") or "").strip(),\n        "price": f"{price:.2f}",\n',
+              '        "keywords": (data.get("keywords") or "").strip(),\n        "state": (data.get("state") or data.get("eligible_state") or "").strip(),\n        "price": f"{price:.2f}",\n'
+          )
+
+          # Improve sector inference for energy/manufacturing projects.
+          text = text.replace(
+              '    sector_rules = [\n',
+              '    sector_rules = [\n        (\n            "energy / manufacturing efficiency",\n            ["energy efficiency", "rural energy", "energy", "ventilation", "efficiency", "manufacturing equipment"],\n        ),\n'
+          )
+
+          backend.write_text(text)
+
+          front = Path('frontend/grantforge-frontend/src/App.jsx')
+          f = front.read_text()
+          f = f.replace('  zip: "",\n  category:', '  zip: "",\n  state: "",\n  category:')
+          f = f.replace('      zip: source.zip.trim(),\n      category:', '      zip: source.zip.trim(),\n      state: source.state.trim(),\n      category:')
+          f = f.replace(
+              '                <label>\n                  ZIP code\n                  <input name="zip" value={form.zip} onChange={updateField} inputMode="numeric" maxLength="10" autoComplete="postal-code" />\n                </label>\n',
+              '                <label>\n                  State <em>*</em>\n                  <select name="state" value={form.state} onChange={updateField} required autoComplete="address-level1">\n                    <option value="">Select state</option>\n                    {[["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arkansas"],["CA","California"],["CO","Colorado"],["CT","Connecticut"],["DE","Delaware"],["FL","Florida"],["GA","Georgia"],["HI","Hawaii"],["ID","Idaho"],["IL","Illinois"],["IN","Indiana"],["IA","Iowa"],["KS","Kansas"],["KY","Kentucky"],["LA","Louisiana"],["ME","Maine"],["MD","Maryland"],["MA","Massachusetts"],["MI","Michigan"],["MN","Minnesota"],["MS","Mississippi"],["MO","Missouri"],["MT","Montana"],["NE","Nebraska"],["NV","Nevada"],["NH","New Hampshire"],["NJ","New Jersey"],["NM","New Mexico"],["NY","New York"],["NC","North Carolina"],["ND","North Dakota"],["OH","Ohio"],["OK","Oklahoma"],["OR","Oregon"],["PA","Pennsylvania"],["RI","Rhode Island"],["SC","South Carolina"],["SD","South Dakota"],["TN","Tennessee"],["TX","Texas"],["UT","Utah"],["VT","Vermont"],["VA","Virginia"],["WA","Washington"],["WV","West Virginia"],["WI","Wisconsin"],["WY","Wyoming"],["DC","District of Columbia"]].map(([code, name]) => <option key={code} value={code}>{name}</option>)}\n                  </select>\n                </label>\n                <label>\n                  ZIP code\n                  <input name="zip" value={form.zip} onChange={updateField} inputMode="numeric" maxLength="10" autoComplete="postal-code" />\n                </label>\n'
+          )
+          f = f.replace(
+              'function GrantCard({ grant, selected, onSelect, onPreview }) {\n  const q = qualificationFor(grant);',
+              'function GrantCard({ grant, selected, onSelect, onPreview }) {\n  const q = qualificationFor(grant);\n  const canPurchase = Boolean(grant.purchasable) && q.label !== "NO";'
+          )
+          f = f.replace(
+              '<button className="button primary" type="button" onClick={() => onPreview(grant)}>\n          Preview this draft\n        </button>\n        <button className="button secondary" type="button" onClick={() => onSelect(grant)}>\n          {selected ? "Selected" : "Select grant"}\n        </button>',
+              '<button className="button primary" type="button" onClick={() => onPreview(grant)} disabled={!canPurchase}>\n          {canPurchase ? "Preview this draft" : "Not purchase-ready"}\n        </button>\n        <button className="button secondary" type="button" onClick={() => onSelect(grant)} disabled={!canPurchase}>\n          {selected ? "Selected" : "Select grant"}\n        </button>'
+          )
+          f = f.replace(
+              '    if (!selectedGrant) {\n      setCheckoutError("Select an opportunity before continuing to checkout.");\n      return;\n    }\n',
+              '    if (!selectedGrant || !selectedGrant.purchasable || qualificationFor(selectedGrant).label === "NO") {\n      setCheckoutError("Select a purchase-ready opportunity before continuing to checkout.");\n      return;\n    }\n'
+          )
+          f = f.replace(
+              '    if (matches.length) {\n      document.getElementById("matches")?.scrollIntoView({ behavior: "smooth", block: "start" });\n      await loadPreview(matches[0], payload);\n',
+              '    if (matches.length) {\n      document.getElementById("matches")?.scrollIntoView({ behavior: "smooth", block: "start" });\n      const firstPurchaseReady = matches.find((grant) => grant.purchasable);\n      if (firstPurchaseReady) await loadPreview(firstPurchaseReady, payload);\n'
+          )
+          f = f.replace(
+              '                  <span>I have reviewed the information above and confirm it is accurate to the best of my knowledge.',
+              '                  <span>I have reviewed the organization name, applicant type, state, budget, funding amount, and project information above and confirm it is accurate to the best of my knowledge.'
+          )
+          front.write_text(f)
+
+          # Add regression tests for new gates.
+          tests = Path('backend/tests/test_v11_server.py')
+          t = tests.read_text()
+          t = t.replace(
+              '        "audience": "low-income families and youth",\n',
+              '        "audience": "low-income families and youth",\n        "state": "MN",\n'
+          )
+          extra = '''\n\ndef test_geography_blocks_appalachian_grant_for_minnesota():\n    grant = {"title": "Appalachian Regional Commission INSPIRE Initiative", "program": "ARC"}\n    ok, note = srv._geography_compatible(grant, "MN")\n    assert ok is False\n    assert "outside" in note.lower()\n\ndef test_geography_allows_appalachian_state():\n    grant = {"title": "Appalachian Regional Commission INSPIRE Initiative", "program": "ARC"}\n    ok, _ = srv._geography_compatible(grant, "VA")\n    assert ok is True\n\ndef test_funding_range_is_hard_gate():\n    grant = {"min_amount": 150000, "max_amount": 350000}\n    assert srv._funding_range_compatible(grant, 90000)[0] is False\n    assert srv._funding_range_compatible(grant, 200000)[0] is True\n    assert srv._funding_range_compatible(grant, 500000)[0] is False\n'''
+          if 'test_geography_blocks_appalachian_grant_for_minnesota' not in t:
+              t += extra
+          tests.write_text(t)
+          PY
+          git config user.name "GrantForgeUSA automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/v11_server.py frontend/grantforge-frontend/src/App.jsx backend/tests/test_v11_server.py
+          git commit -m "Harden customer matching and purchase quality gates"
+          git push origin HEAD:main
