@@ -342,3 +342,26 @@ def test_live_source_failure_does_not_fall_back(monkeypatch):
     results, has_strong = srv.shortlist(payload)
     assert results == []
     assert has_strong is False
+
+
+
+def test_flat_pricing_for_all_applicant_types():
+    categories = ["K-12 School / District / Educator", "College / University / Research Institution", "Church / Faith Organization", "501(c)(3) Nonprofit", "Small Business", "For-Profit Organization", "City / County / Local Government", "State Government / Agency", "Tribal Government / Organization", "Public Housing Authority", "Individual / Independent Applicant", "Other Eligible Applicant"]
+    for category in categories:
+        for budget in (1, 100000, 5000000, 500000000):
+            assert srv.price_for(category, budget) == pytest.approx(49.99)
+
+
+def test_higher_ed_uses_official_eligibility_codes():
+    assert srv._is_eligible_for_applicant({"eligibility_codes": ["06"]}, "HIGHER_ED") is True
+    assert srv._is_eligible_for_applicant({"eligibility_codes": ["20"]}, "HIGHER_ED") is True
+    assert srv._is_eligible_for_applicant({"eligibility_codes": ["23"]}, "HIGHER_ED") is False
+
+
+def test_narrative_does_not_invent_default_outcomes_or_capacity():
+    grant = {"title": "Research Opportunity", "program": "Federal Program", "deadline": "2027-01-01", "max_amount": 500000, "summary": "Supports rigorous research and documented project outcomes."}
+    payload = _payload("Example University", "research, education, rural", "College / University / Research Institution")
+    text = srv.build_narrative(payload, grant)
+    assert "20%" not in text and "70%" not in text and "90%" not in text
+    assert "does not assume" in text
+    assert "Applicant Validation Required Before Submission" in text

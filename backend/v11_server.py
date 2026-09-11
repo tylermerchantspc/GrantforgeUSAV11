@@ -25,7 +25,7 @@ from backend.grantsgov_live import fetch_live_grant, search_live_grants
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph
+from reportlab.platypus import Paragraph, Spacer, SimpleDocTemplate
 import pandas as pd
 
 # ---------------- bootstrap env ----------------
@@ -55,11 +55,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(PROTECTED_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 
-# Public per-draft pricing
-TEACHER_PRICE = 9.99
-SMALL_ORG_PRICE = 49.99
-MEDIUM_ORG_PRICE = 99.99
-LARGE_ORG_PRICE = 199.99
+# Public per-draft pricing: one flat fee regardless of applicant type or grant size.
+FLAT_DRAFT_PRICE = float(os.getenv("GRANT_DRAFT_PRICE", "49.99"))
 TOKEN_TTL_SECONDS = int(os.getenv("DOWNLOAD_TOKEN_TTL_SECONDS", str(24 * 60 * 60)))
 
 RATE_LIMITS = {
@@ -137,19 +134,31 @@ def _tokenize_text(s: str) -> List[str]:
 
 
 INTAKE_TYPE_MAP = {
-    "teacher (classroom)": "EDU",
-    "school / district": "EDU",
-    "church / faith org": "NONPROFIT",
-    "501c3 nonprofit": "NONPROFIT",
+    "k-12 school / district / educator": "EDU_K12",
+    "college / university / research institution": "HIGHER_ED",
+    "church / faith organization": "NONPROFIT",
+    "501(c)(3) nonprofit": "NONPROFIT_501C3",
+    "nonprofit / community organization": "NONPROFIT",
     "small business": "SMALL_BUSINESS",
+    "for-profit organization": "FOR_PROFIT",
+    "city / county / local government": "GOV_LOCAL",
+    "state government / agency": "GOV_STATE",
+    "tribal government / organization": "TRIBAL",
+    "public housing authority": "HOUSING",
+    "individual / independent applicant": "INDIVIDUAL",
+    "other eligible applicant": "OTHER",
+    "teacher (classroom)": "EDU_K12",
+    "school / district": "EDU_K12",
+    "church / faith org": "NONPROFIT",
+    "501c3 nonprofit": "NONPROFIT_501C3",
     "city / municipality": "GOV_LOCAL",
-    "other": "NONPROFIT",
+    "other": "OTHER",
 }
 
 
 def normalize_applicant_type(category: str) -> str:
     c = (category or "").strip().lower()
-    return INTAKE_TYPE_MAP.get(c, "NONPROFIT")
+    return INTAKE_TYPE_MAP.get(c, "OTHER")
 
 
 def _normalize_keyword_token(token: str) -> str:
@@ -569,14 +578,9 @@ def _wrap_draw_line(
 
 
 def price_for(category: str, annual_budget: float) -> float:
-    category_key = (category or "").strip().lower()
-    if category_key == "teacher (classroom)":
-        return TEACHER_PRICE
-    if annual_budget <= 500_000:
-        return SMALL_ORG_PRICE
-    if annual_budget <= 2_000_000:
-        return MEDIUM_ORG_PRICE
-    return LARGE_ORG_PRICE
+    """Return the single public price for one customized full proposal draft."""
+    _ = category, annual_budget
+    return FLAT_DRAFT_PRICE
 
 
 def fraud_check(category: str, amount: float) -> Dict[str, Any]:
@@ -670,7 +674,7 @@ def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant
         return False, "Opportunity is focused on Tribal programs not identified in the intake."
 
     # Education and small-business searches are especially vulnerable to broad R&D terms.
-    required = 2 if applicant_type in ("EDU", "SMALL_BUSINESS") else 1
+    required = 2 if applicant_type in ("EDU_K12", "HIGHER_ED", "SMALL_BUSINESS", "FOR_PROFIT") else 1
     if len(distinctive_overlap) < required:
         return False, "Insufficient project-specific overlap after removing broad search terms."
     return True, ""
@@ -890,87 +894,49 @@ def infer_client_sector(kws: List[str]) -> str:
 
 
 def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
+    """Use official Grants.gov applicant codes first; fall back to normalized text for fixtures/legacy data."""
+    code_map = {
+        "EDU_K12": {"05", "99"},
+        "HIGHER_ED": {"06", "20", "99"},
+        "NONPROFIT_501C3": {"12", "99"},
+        "NONPROFIT": {"12", "13", "99"},
+        "SMALL_BUSINESS": {"23", "99"},
+        "FOR_PROFIT": {"22", "99"},
+        "GOV_LOCAL": {"01", "02", "04", "99"},
+        "GOV_STATE": {"00", "99"},
+        "TRIBAL": {"07", "11", "99"},
+        "HOUSING": {"08", "99"},
+        "INDIVIDUAL": {"21", "99"},
+        "OTHER": {"25", "99"},
+    }
+    codes = {str(code or "").strip().zfill(2) for code in (gr.get("eligibility_codes") or []) if str(code or "").strip()}
+    if codes:
+        return bool(codes & code_map.get(applicant_type, {"99"}))
     title = (gr.get("title") or "").lower()
     tags = " ".join(normalized_tags(gr.get("tags", [])))
-    haystack = f"{title} {tags}"
-
-    # hard gating rules before scoring
-    if "sbir" in haystack:
+    elig = " ".join(str(e).lower() for e in gr.get("eligible_types", []))
+    haystack = f"{title} {tags} {elig}"
+    if "unrestricted" in haystack:
+        return True
+    if "sbir" in haystack or "sttr" in haystack:
         return applicant_type == "SMALL_BUSINESS"
     if "cdbg" in haystack:
         return applicant_type == "GOV_LOCAL"
-    if any(
-        k in haystack
-        for k in [
-            "classroom",
-            "school",
-            "district",
-            "titlei",
-            "stem",
-            "robotics",
-            "perkins",
-            "teacher",
-        ]
-    ):
-        return applicant_type == "EDU"
-    if any(
-        k in haystack
-        for k in [
-            "city",
-            "municipality",
-            "public safety",
-            "hazard mitigation",
-            "cdbg",
-            "bric",
-        ]
-    ):
-        return applicant_type == "GOV_LOCAL"
-    if any(
-        k in haystack
-        for k in ["apprenticeship", "manufacturing workforce", "skilled trades"]
-    ):
-        return applicant_type in ("SMALL_BUSINESS", "NONPROFIT")
-
-    if applicant_type in ("NONPROFIT", "EDU") and any(
-        k in haystack for k in ["telecom", "telecommunications", "broadband", "fiber"]
-    ):
-        return False
-
-    elig = " ".join([str(e).lower() for e in gr.get("eligible_types", [])])
-    if "unrestricted" in elig:
-        return True
-    if applicant_type == "SMALL_BUSINESS":
-        return any(
-            t in elig
-            for t in [
-                "small business",
-                "startup",
-                "for-profit",
-                "smb",
-                "microenterprise",
-            ]
-        )
-    if applicant_type == "GOV_LOCAL":
-        return any(
-            t in elig
-            for t in ["municipality", "city", "county", "local government", "tribal"]
-        )
-    if applicant_type == "EDU":
-        return any(
-            t in elig
-            for t in ["school", "district", "teacher", "educator", "k12", "classroom"]
-        )
-    return any(
-        t in elig
-        for t in [
-            "501",
-            "nonprofit",
-            "community",
-            "community-based organization",
-            "health network",
-        ]
-    )
-
+    needles = {
+        "EDU_K12": ("school district", "school", "teacher", "educator", "k12", "classroom"),
+        "HIGHER_ED": ("higher education", "college", "university", "research institution"),
+        "NONPROFIT_501C3": ("501", "501(c)(3)", "nonprofit"),
+        "NONPROFIT": ("nonprofit", "community-based", "community organization", "faith-based"),
+        "SMALL_BUSINESS": ("small business", "startup", "microenterprise"),
+        "FOR_PROFIT": ("for-profit", "for profit", "commercial organization"),
+        "GOV_LOCAL": ("municipality", "city", "township", "county", "local government", "special district"),
+        "GOV_STATE": ("state government", "state agency"),
+        "TRIBAL": ("tribal government", "tribal organization", "native american"),
+        "HOUSING": ("public housing", "housing authority", "indian housing"),
+        "INDIVIDUAL": ("individual", "individual applicant"),
+        "OTHER": ("other",),
+    }
+    return any(term in haystack for term in needles.get(applicant_type, ()))
 
 def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = None) -> Tuple[List[Dict[str, Any]], bool]:
     """
@@ -1185,115 +1151,79 @@ def _mk_evaluation_lines(audience: str) -> List[str]:
 
 
 def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
-    """Build a polished, senior grant-writer narrative draft with structured sections."""
+    """Build an applicant-aware proposal draft without inventing facts, metrics, or compliance claims."""
     intake = dict(intake or {})
     org = _organization_name(intake)
-    proj_title = (intake.get("projectTitle") or "Strategic Initiative").strip()
-    category = (intake.get("category") or intake.get("who") or "organization").strip()
-    audience = (intake.get("audience") or "program participants").strip().rstrip(".")
-    timeline = (intake.get("timeline") or "12 months").strip().rstrip(".")
+    project = (intake.get("projectTitle") or "Proposed Project").strip()
+    category = (intake.get("category") or intake.get("who") or "eligible applicant").strip()
+    applicant_type = normalize_applicant_type(category)
+    audience = (intake.get("audience") or "the intended beneficiaries").strip().rstrip(".")
+    timeline = (intake.get("timeline") or "the proposed grant period").strip().rstrip(".")
+    need = (intake.get("need") or "").strip()
     notes = (intake.get("notes") or "").strip()
-    stated_need = (intake.get("need") or "").strip()
-
     amount = _safe_float(intake.get("amountRequested"))
     annual_budget = _safe_float(intake.get("annualBudget"), 0)
     kws = normalized_keywords((intake.get("keywords") or "").strip())
-    client_sector = infer_client_sector(kws) or "community impact"
-
-    g_title = grant.get("title") or "federal funding opportunity"
-    g_deadline = grant.get("deadline") or "TBA"
-    g_match = int(grant.get("requires_match_percent", 0) or 0)
+    sector = infer_client_sector(kws) or "the proposed project area"
+    g_title = _sanitize_text(grant.get("title") or "Federal funding opportunity", 240)
+    g_program = _sanitize_text(grant.get("program") or grant.get("agency") or "Federal program", 240)
+    g_deadline = _sanitize_text(grant.get("deadline") or "TBA", 80)
+    g_min = _safe_float(grant.get("min_amount"), 0)
     g_max = _safe_float(grant.get("max_amount"), 0)
-    g_url = grant_display_url(grant) if grant else ""
-
-    req_str = f"${amount:,.0f}" if amount > 0 else "an amount aligned with program priorities"
-    aligned_request = min(amount, g_max) if (amount > 0 and g_max > 0) else amount
-    aligned_req_str = f"${aligned_request:,.0f}" if aligned_request > 0 else req_str
-
-    need_context = (
-        stated_need
-        or notes
-        or (
-            f"{org} has identified persistent service gaps for {audience}, including uneven access to high-quality support, limited program continuity, and insufficient resources to sustain measurable improvement."
-        )
-    )
-    budget_context = (
-        f"The organization currently manages an annual operating budget of approximately ${annual_budget:,.0f}, supported by established internal controls, segregation of duties, and board-level fiscal oversight."
-        if annual_budget > 0
-        else "The organization maintains grant-ready financial controls, procurement standards, and leadership oversight consistent with federal compliance expectations."
-    )
-
-    objectives = _mk_objectives_from_keywords(kws, audience)
-    fallback_objectives = [
-        f"Deliver {proj_title} through a structured model with clear milestones and documented accountability for {audience}.",
-        "Increase participation and retention through coordinated outreach, service delivery, and continuous engagement practices.",
-        "Demonstrate measurable gains through routine monitoring, data-informed adjustments, and quarterly performance review.",
-    ]
-    if not objectives:
-        objectives = list(fallback_objectives)
-    while len(objectives) < 3:
-        objectives.append(fallback_objectives[len(objectives)])
-
-    match_clause = (
-        f" A documented strategy will satisfy the required {g_match}% match through eligible cash and in-kind contributions."
-        if g_match > 0
-        else ""
-    )
-    ceiling_clause = (
-        f" Because the requested amount exceeds the published award ceiling, this narrative aligns budget assumptions to approximately {aligned_req_str} while preserving core outcomes through phased implementation."
-        if g_max > 0 and amount > g_max
-        else ""
-    )
-
-    outcome_targets = [
-        "Increase direct participant engagement by at least 20% over baseline within the first implementation year.",
-        "Achieve measurable proficiency or competency improvement for at least 70% of participants receiving full program dosage.",
-        "Maintain on-time milestone completion of at least 90% across implementation, reporting, and compliance activities.",
-    ]
-
+    g_summary = _sanitize_text(grant.get("summary") or "", 900)
+    g_match = int(_safe_float(grant.get("requires_match_percent"), 0))
+    req_str = f"${amount:,.0f}" if amount > 0 else "the amount shown in the final budget"
+    budget_str = f"${annual_budget:,.0f}" if annual_budget > 0 else "not supplied"
+    focus = ", ".join(kws[:5]) if kws else project
+    need_text = need or notes or f"The applicant identified a need directly related to {focus}."
+    profile = {
+        "EDU_K12": ("education applicant", "instructional or school-system delivery", "learners, educators, and the school community"),
+        "HIGHER_ED": ("higher-education or research institution", "research, teaching, institutional, or sponsored-program delivery", "the identified research, education, or community beneficiaries"),
+        "NONPROFIT_501C3": ("501(c)(3) nonprofit", "mission-driven program delivery", "the identified beneficiaries and community partners"),
+        "NONPROFIT": ("nonprofit or community organization", "mission-driven program delivery", "the identified beneficiaries and community partners"),
+        "SMALL_BUSINESS": ("small business", "business, innovation, operational, or commercialization activity", "the business, workforce, customers, and other stated beneficiaries"),
+        "FOR_PROFIT": ("for-profit organization", "business, innovation, operational, or commercialization activity", "the organization and other stated beneficiaries"),
+        "GOV_LOCAL": ("local-government applicant", "public-service, infrastructure, or community implementation", "residents and other stated public beneficiaries"),
+        "GOV_STATE": ("state-government applicant", "statewide or agency-led implementation", "the stated public beneficiaries"),
+        "TRIBAL": ("Tribal applicant", "Tribal government or organization-led implementation", "the stated Tribal community beneficiaries"),
+        "HOUSING": ("public-housing applicant", "housing, resident-service, or community implementation", "residents and other stated beneficiaries"),
+        "INDIVIDUAL": ("individual applicant", "applicant-led project implementation", "the stated beneficiaries"),
+        "OTHER": ("eligible applicant", "project implementation", "the stated beneficiaries"),
+    }.get(applicant_type, ("eligible applicant", "project implementation", "the stated beneficiaries"))
+    entity_label, delivery_frame, beneficiary_frame = profile
+    opportunity_range = []
+    if g_min > 0:
+        opportunity_range.append(f"published floor ${g_min:,.0f}")
+    if g_max > 0:
+        opportunity_range.append(f"published ceiling ${g_max:,.0f}")
+    range_text = ", ".join(opportunity_range) if opportunity_range else "award range not captured in the current synopsis"
+    match_text = f" A {g_match}% match is listed and must be verified against the official notice." if g_match > 0 else ""
+    synopsis_text = f" The current Grants.gov synopsis states: {g_summary}" if g_summary else ""
+    activity_language = {
+        "energy / manufacturing efficiency": "procurement or installation planning, operational implementation, performance measurement, and documented efficiency results",
+        "telehealth / healthcare": "service design, implementation protocols, access measures, quality monitoring, and documented health-service outcomes",
+        "workforce development": "participant recruitment, training or credential activities, employer/partner coordination, and employment or skill outcomes",
+        "education / STEM": "instructional or research design, educator/participant engagement, implementation fidelity, and learning or research outcomes",
+        "housing / community development": "project delivery, resident/community engagement, implementation milestones, and measurable community outcomes",
+        "public safety / emergency management": "readiness activities, implementation milestones, interagency coordination, and measurable safety or resilience outcomes",
+        "conservation / environment": "field or implementation activities, stewardship milestones, monitoring, and measurable environmental outcomes",
+        "arts / culture": "creative or cultural activities, public engagement, implementation milestones, and measurable participation or access outcomes",
+        "entrepreneurship / innovation": "research or development activity, validation milestones, technical progress, and commercialization or adoption measures",
+    }.get(sector, "defined project activities, documented milestones, responsible implementation, and measurable outcomes")
     sections = [
-        (
-            "Executive Summary\n"
-            f"{org} submits this proposal for the {g_title} opportunity to implement '{proj_title}', a focused initiative designed for {audience}. As a {category}, the organization is positioned to execute a disciplined program in the {client_sector} domain over {timeline}. The request seeks {req_str} to launch or scale activities that address documented barriers, produce measurable outcomes, and align with federal priorities for equitable access, service quality, and accountability. The implementation approach integrates strategic planning, practical delivery milestones, and compliance-ready oversight so reviewers can clearly evaluate readiness, impact potential, and responsible stewardship of federal funds."
-        ),
-        (
-            "Statement of Need\n"
-            f"The proposed project responds to a clearly documented need: {need_context} Current conditions limit timely access to services, reduce continuity for high-need populations, and constrain long-term outcomes where sustained intervention is required. Without external investment, existing resources are insufficient to provide the scale, consistency, and quality controls necessary for durable results. This proposal addresses those constraints by pairing evidence-informed programming with realistic implementation sequencing, cross-functional coordination, and consistent performance monitoring. Federal support is therefore essential to close service gaps, improve operational capacity, and deliver measurable public benefit for the target population."
-        ),
-        (
-            "Program Description\n"
-            f"The program will be delivered as an integrated model with phased rollout, frontline implementation supports, and periodic quality assurance checkpoints. Core activities include: (1) {objectives[0]} (2) {objectives[1]} (3) {objectives[2]} "
-            "Program leadership will coordinate staffing, partner alignment, and procurement planning in advance of full launch, then transition to consistent service delivery with monthly management reviews. Data collection procedures will be embedded from project start to support performance tracking, rapid issue resolution, and reporting confidence throughout the grant period."
-        ),
-        (
-            "Target Population\n"
-            f"The primary beneficiaries are {audience}. The project design prioritizes populations facing access barriers, service discontinuity, or measurable outcome disparities within the service area. Outreach and intake processes will be structured to improve participation among underrepresented groups while maintaining transparent eligibility and referral standards. Program activities are designed to be practical, culturally responsive, and outcomes-oriented so participants receive sustained support rather than one-time interventions. This approach strengthens equity, increases participation persistence, and improves the likelihood of durable gains tied to project objectives."
-        ),
-        (
-            "Implementation Plan\n"
-            f"Implementation will follow a structured timeline of {timeline} with three operational phases: launch readiness, full implementation, and refinement for sustainability. During launch readiness, the organization will finalize staffing assignments, partner roles, baseline metrics, and procurement actions. During full implementation, services will be delivered at planned dosage with monthly progress reviews and risk-management checks. During refinement, leadership will analyze performance trends, document lessons learned, and apply corrective actions to strengthen outcomes. Throughout all phases, governance protocols will support schedule adherence, quality control, fiscal compliance, and responsive project management."
-        ),
-        (
-            "Expected Outcomes\n"
-            f"Expected outcomes are specific, measurable, and aligned to grant priorities. By the end of the project period, {org} will target the following benchmarks: {outcome_targets[0]} {outcome_targets[1]} {outcome_targets[2]} Outcome data will be reviewed on a recurring basis by program and executive leadership to verify trajectory, identify gaps, and apply evidence-based adjustments. This framework ensures the project is not only active, but demonstrably effective in producing meaningful improvements for the intended population."
-        ),
-        (
-            "Organizational Capacity\n"
-            f"{org} has the operational and administrative capacity to execute this project with consistency and accountability. The organization maintains defined leadership roles, established oversight routines, and documented procedures for procurement, reporting, and financial management. {budget_context} Program delivery teams will be supported by management personnel responsible for milestone tracking, partner communication, and compliance documentation. This structure positions the organization to administer federal funds responsibly while maintaining service quality and implementation discipline."
-        ),
-        (
-            "Budget Use\n"
-            f"The budget request of {req_str} will be allocated across direct program delivery, personnel time, implementation supports, participant resources, and evaluation activities required to achieve project outcomes. Budget assumptions align with allowable federal cost principles and practical delivery requirements.{ceiling_clause}{match_clause} Quarterly fiscal reviews will compare planned versus actual expenditures, validate allowability, and document variances with corrective action when needed. This disciplined budget approach supports transparency, audit readiness, and strong alignment between spending and measurable performance results."
-        ),
-        (
-            "Sustainability\n"
-            f"Sustainability planning is built into project design from the outset. Throughout implementation, {org} will document effective practices, build partner commitments, and integrate successful activities into ongoing organizational operations where feasible. Performance evidence generated during the grant period will be used to support continuation strategies, including future funding applications, braided resource planning, and program refinement. Prior to submission, leadership will complete final validation of all opportunity requirements for {g_title} (deadline: {g_deadline})."
-            + (" The official Grants.gov opportunity URL is included in the order details section." if g_url else "")
-        ),
+        "Executive Summary\n" + f"{org}, a {entity_label}, seeks {req_str} through {g_title} to carry out '{project}' over {timeline}. The project is intended to serve {audience}. Based on the information supplied by the applicant, the proposed work centers on {focus} and falls within {sector}. This draft frames the project around the selected federal opportunity while preserving applicant responsibility for every factual statement, target, attachment, certification, and final submission decision.",
+        "Funding Opportunity Alignment\n" + f"Selected opportunity: {g_title}. Program/agency reference: {g_program}. Current deadline captured by GrantForgeUSA: {g_deadline}. Funding information captured from the opportunity: {range_text}. The requested amount is {req_str}.{match_text}{synopsis_text} Before submission, the applicant must compare this draft with the complete current notice, amendments, eligibility rules, required registrations, and application package.",
+        "Statement of Need\n" + f"The applicant described the underlying need as follows: {need_text} The proposal should support this statement with applicant-verified local data, baseline information, documented demand, prior results, citations, or other evidence required by the funding notice. GrantForgeUSA does not invent those facts when they are not supplied in the intake.",
+        "Program Description\n" + f"'{project}' will use {delivery_frame} focused on {activity_language}. The working scope is designed around {audience} and the applicant's stated priorities: {focus}. Final activities, quantities, locations, staffing assignments, partners, procurement specifications, and methods should be confirmed by {org} before submission and revised wherever the official notice requires a different structure.",
+        "Goals, Objectives, and Performance Measures\n" + f"The draft goal is to address the stated need through a focused {sector} project with measurable implementation and outcome evidence. Before submission, {org} should set applicant-owned targets for: (1) the quantity and timing of major activities or deliverables; (2) the primary outcome expected for {audience}; and (3) completion of required project, reporting, and compliance milestones. Baselines and numerical targets should come from the applicant's records, research plan, operating data, or other defensible evidence rather than default percentages.",
+        "Implementation Plan\n" + f"The proposed period is {timeline}. A final work plan should identify the responsible lead for each major task, milestone dates, partner or vendor responsibilities, dependencies, and the evidence used to document completion. The implementation sequence should cover startup/readiness, core delivery, monitoring and adjustment, and closeout/reporting. Where the notice uses required phases or milestones, those requirements supersede this general structure.",
+        "Target Population / Beneficiaries\n" + f"The intake identifies {audience} as the primary audience or beneficiary group. For this {entity_label}, the proposal should explain how that audience connects to {beneficiary_frame}, why the project design is appropriate for them, and how participation, access, research subjects, customers, residents, or other beneficiaries will be defined where applicable. Any demographic, geographic, or participation claims must be verified by the applicant.",
+        "Organizational Capacity\n" + f"The applicant reported an annual operating or organizational budget of approximately {budget_str}. The final application should describe only verified capacity: authorized leadership, relevant personnel or investigators, prior experience, required registrations, financial systems, facilities, partnerships, and other qualifications specifically requested by the notice. This draft does not assume that {org} possesses a certification, internal control, prior award history, staffing level, or partnership unless the applicant supplied and confirms that fact.",
+        "Budget Use\n" + f"The working request is {req_str}. The final budget narrative should connect each cost directly to a confirmed project activity and use the cost categories, allowability rules, indirect-cost treatment, match requirements, and documentation standards in the official notice. GrantForgeUSA does not treat a cost as federally allowable merely because it was entered in the intake. The applicant should reconcile the narrative, line-item budget, quotes, calculations, and requested federal share before submission.",
+        "Sustainability\n" + f"The sustainability section should explain which project benefits or capabilities {org} intends to maintain after the federal period and identify only realistic, applicant-supported continuation resources. Depending on the project, those may include institutional adoption, operating revenue, future grants, partner commitments, maintenance planning, dissemination, commercialization, or integration into ongoing operations. No continuation funding is assumed in this draft.",
+        "Applicant Validation Required Before Submission\n" + f"This is a customized working proposal draft, not an agency approval or eligibility determination. {org} must verify the current notice for {g_title}, confirm applicant eligibility, replace or substantiate any draft assumption, finalize all numerical targets and budget details, complete required forms and attachments, obtain signatures/certifications, and submit through the official channel by the controlling deadline.",
     ]
-
     return "\n\n".join(sections)
-
 
 def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     """Backward-compatible alias for narrative builder."""
@@ -1301,142 +1231,49 @@ def build_draft_text(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
 
 
 def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
-    """
-    Generate a PDF from the given payload.
-    If 'draft_body' is present, render a structured narrative + order details.
-    Otherwise, fall back to key/value listing (legacy).
-    """
-    os.makedirs(PDF_DIR, exist_ok=True)  # ensure exists at write time
+    """Generate a paginated proposal PDF with protected header/footer space."""
+    os.makedirs(PDF_DIR, exist_ok=True)
     pdf_path = os.path.join(PDF_DIR, f"{order_id}.pdf")
-    c = canvas.Canvas(pdf_path, pagesize=letter)
-
-    left_margin = 54
-    top_y = 770
-    body_top_y = 720
-    bottom_margin = 96
-    line_width_chars = 98
-
     created_at = _now_utc()
-
-    def draw_header() -> int:
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(left_margin, top_y, "GrantforgeUSA | Proposal Draft")
-        c.setFont("Helvetica", 10)
-        c.drawString(left_margin, top_y - 15, f"Order: {order_id}")
-        c.drawString(left_margin, top_y - 28, f"Created: {created_at}")
-        return body_top_y
-
-    def draw_footer():
-        c.setFont("Helvetica-Oblique", 9)
-        c.drawString(
-            left_margin,
-            48,
-            "Review and edit all draft materials before submission. All sales final. No refunds.",
-        )
-
-    def new_page() -> int:
-        draw_footer()
-        c.showPage()
-        return draw_header()
-
-    y = draw_header()
-    c.setFont("Helvetica", 10)
-
-    def draw_section_header(title: str) -> int:
-        c.setFont("Helvetica-Bold", 11)
-        new_y = _wrap_draw_line(c, title, left_margin, y, width_chars=line_width_chars)
-        c.setFont("Helvetica", 10)
-        return new_y
-
-    def draw_line(text: str) -> int:
-        return _wrap_draw_line(c, text, left_margin, y, width_chars=line_width_chars)
-
-    def draw_hyperlink(label: str, url: str) -> int:
-        styles = getSampleStyleSheet()
-        style = styles["Normal"].clone("GrantLinkStyle")
-        style.fontName = "Helvetica"
-        style.fontSize = 10
-        style.leading = 14
-        style.textColor = "#003399"
-        para = Paragraph(
-            f'<a href="{url}">{_sanitize_text(label, 240)}</a>',
-            style,
-        )
-        wrapped_w, wrapped_h = para.wrap(letter[0] - (left_margin * 2), 100)
-        para.drawOn(c, left_margin, y - wrapped_h + 2)
-        return y - wrapped_h - 4
-
+    def esc(value: Any) -> str:
+        return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    styles = getSampleStyleSheet()
+    body = styles["BodyText"].clone("GrantForgeBody"); body.fontName = "Helvetica"; body.fontSize = 10; body.leading = 14; body.spaceAfter = 8
+    heading = styles["Heading2"].clone("GrantForgeHeading"); heading.fontName = "Helvetica-Bold"; heading.fontSize = 12; heading.leading = 15; heading.spaceBefore = 8; heading.spaceAfter = 6
+    small = styles["BodyText"].clone("GrantForgeSmall"); small.fontName = "Helvetica"; small.fontSize = 9; small.leading = 12; small.spaceAfter = 5
+    doc = SimpleDocTemplate(pdf_path, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=72, bottomMargin=78, title=f"GrantForgeUSA Proposal Draft - {order_id}", author="GrantForgeUSA, LLC")
+    def page_frame(c, _doc):
+        c.saveState(); c.setFont("Helvetica-Bold", 11); c.drawString(54, 756, "GrantForgeUSA | Proposal Draft"); c.setFont("Helvetica", 8.5); c.drawString(54, 742, f"Order: {order_id} | Created: {created_at}"); c.setFont("Helvetica-Oblique", 8); c.drawString(54, 36, "Customized drafting service - verify against the current official notice before submission."); c.setFont("Helvetica", 8); c.drawRightString(558, 36, f"Page {_doc.page}"); c.restoreState()
+    story = []
     draft_body = payload.get("draft_body")
     if isinstance(draft_body, str) and draft_body.strip():
-        y = draw_section_header("Grant Narrative")
-
-        for para in draft_body.split("\n\n"):
-            for line in para.split("\n"):
-                if y < bottom_margin:
-                    y = new_page()
-                if line.strip().endswith(":"):
-                    c.setFont("Helvetica-Bold", 10)
-                    y = _wrap_draw_line(
-                        c, line.strip(), left_margin, y, width_chars=line_width_chars
-                    )
-                    c.setFont("Helvetica", 10)
-                else:
-                    y = _wrap_draw_line(
-                        c, line, left_margin, y, width_chars=line_width_chars
-                    )
-            y -= 8
-
-        if y < bottom_margin + 20:
-            y = new_page()
-
-        y = draw_section_header("Grant opportunity details")
-
-        summary_lines = [
-            f"Project title: {payload.get('projectTitle', '')}",
-            f"Applicant type: {payload.get('category', '')}",
-            f"Requested amount: ${_safe_float(payload.get('amountRequested'), 0):,.2f}",
-            f"Service fee: ${_safe_float(payload.get('price'), 0):,.2f}",
-            f"Recommended opportunity: {payload.get('grant_title', '')}",
-        ]
-        for line in summary_lines:
-            if y < bottom_margin:
-                y = new_page()
-            y = draw_line(line)
-
-        grant_url = (payload.get("grant_url") or "").strip()
-        if grant_url:
-            y = draw_hyperlink("Grant Opportunity", grant_url)
-
-        recommendations = (
-            payload.get("recommendations")
-            if isinstance(payload.get("recommendations"), list)
-            else []
-        )
-        if recommendations:
-            if y < bottom_margin:
-                y = new_page()
-            y = draw_section_header("Recommended grant opportunities")
-            for rec in recommendations:
-                title = _sanitize_text(
-                    (rec or {}).get("title", "Untitled opportunity"), 180
-                )
-                rec_url = _sanitize_text(
-                    (rec or {}).get("program_url") or (rec or {}).get("url", ""),
-                    500,
-                )
-                if not rec_url:
-                    continue
-                if y < bottom_margin:
-                    y = new_page()
-                y = draw_hyperlink(title, rec_url)
-
+        story.append(Paragraph("Grant Narrative", heading))
+        for block in draft_body.split("\n\n"):
+            block = block.strip()
+            if not block: continue
+            lines = block.split("\n", 1)
+            if len(lines) == 2 and len(lines[0]) <= 90:
+                story.append(Paragraph(esc(lines[0]), heading)); story.append(Paragraph(esc(lines[1]).replace("\n", "<br/>"), body))
+            else:
+                story.append(Paragraph(esc(block).replace("\n", "<br/>"), body))
     else:
-        y = draw_line("Grant narrative content was not available for this order.")
-
-    draw_footer()
-    c.save()
+        story.append(Paragraph("GrantForgeUSA Order Details", heading))
+        for key, value in payload.items(): story.append(Paragraph(f"<b>{esc(key)}:</b> {esc(value)}", body))
+    story.append(Spacer(1, 10)); story.append(Paragraph("Grant Opportunity Details", heading))
+    details = [("Project title", payload.get("projectTitle", "")), ("Applicant type", payload.get("category", "")), ("Requested amount", f"${_safe_float(payload.get('amountRequested'), 0):,.2f}"), ("Service fee", f"${_safe_float(payload.get('price'), 0):,.2f}"), ("Recommended opportunity", payload.get("grant_title", "")), ("Program", payload.get("grant_program", "")), ("Deadline", payload.get("grant_deadline", ""))]
+    for label, value in details: story.append(Paragraph(f"<b>{esc(label)}:</b> {esc(value)}", body))
+    grant_url = _safe_grants_url(payload.get("grant_url") or "")
+    if grant_url: story.append(Paragraph(f'<b>Official opportunity:</b> <a href="{esc(grant_url)}">{esc(grant_url)}</a>', body))
+    recommendations = payload.get("recommendations") if isinstance(payload.get("recommendations"), list) else []
+    if recommendations:
+        story.append(Spacer(1, 6)); story.append(Paragraph("Other Screened Opportunities", heading))
+        for item in recommendations[:10]:
+            if not isinstance(item, dict): continue
+            title = esc(item.get("title") or "Federal funding opportunity"); url = _safe_grants_url(item.get("program_url") or item.get("url") or "")
+            story.append(Paragraph(f'• <a href="{esc(url)}">{title}</a>' if url else f"• {title}", small))
+    story.append(Spacer(1, 12)); story.append(Paragraph("<b>Final review notice:</b> GrantForgeUSA is an independent private drafting service. The customer must verify applicant eligibility, all facts, the current funding notice, required forms, certifications, attachments, budget, and final submission. Funding is not guaranteed. Customized drafting services are final-sale subject to the Terms of Service and applicable law.", small))
+    doc.build(story, onFirstPage=page_frame, onLaterPages=page_frame)
     return pdf_path
-
 
 @app.before_request
 def _apply_rate_limit():

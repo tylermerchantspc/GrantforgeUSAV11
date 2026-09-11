@@ -7,7 +7,7 @@ The September 2026 launch candidate is a **static-first public preview** for a l
 The soft-launch site:
 
 - accepts applications for a 3–5 organization pilot cohort;
-- displays the approved pricing model: $9.99 / $49.99 / $99.99 / $199.99;
+- uses one $49.99 flat price for a selected full customized proposal draft;
 - does not collect payment or create orders;
 - does not expose the legacy local grant dataset as verified opportunity data;
 - prepares an application in the visitor's email client instead of storing form data;
@@ -52,12 +52,10 @@ The current `backend/data/grants.json` file is development/demo material and mus
 
 ## Pricing model
 
-| Applicant segment | Planned standard pilot price |
+| Service | Price |
 |---|---:|
-| Teacher or classroom project | $9.99 |
-| Organization with annual operating budget up to $500,000 | $49.99 |
-| Organization with annual operating budget from $500,000 to $2 million | $99.99 |
-| Organization with annual operating budget above $2 million | $199.99 |
+| Federal opportunity search, screening, official links, and preview | Free |
+| One selected customized full proposal draft | $49.99 |
 
 Final scope is confirmed before an engagement begins. Multiple opportunities, extensive attachments, unusual compliance requirements, or materially incomplete intake may require a separate scope.
 

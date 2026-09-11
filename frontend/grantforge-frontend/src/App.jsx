@@ -16,15 +16,10 @@ const SUPPORT_EMAIL = (
   ["tylermerchantspc", "gmail.com"].join("@")
 ).trim();
 
-const PRICE_RANGE = "$9.99–$199.99";
+const FLAT_DRAFT_PRICE = "$49.99";
 
-function serviceFeeFor(category, annualBudget) {
-  if (String(category || "").toLowerCase() === "teacher (classroom)") return "$9.99";
-  const budget = Number(annualBudget);
-  if (!Number.isFinite(budget) || budget <= 0) return "Select your organization details";
-  if (budget <= 500000) return "$49.99";
-  if (budget <= 2000000) return "$99.99";
-  return "$199.99";
+function serviceFeeFor() {
+  return FLAT_DRAFT_PRICE;
 }
 
 const INITIAL_FORM = {
@@ -57,7 +52,7 @@ const LEGAL_PAGES = {
       ],
       [
         "Payment information",
-        "Payment card information is collected and processed by the payment provider used at checkout. GrantForgeUSA does not ask you to place card numbers, bank credentials, passwords, Social Security numbers, protected health information, or student education records in the project intake.",
+        "Payment card information is collected and processed by the payment provider used at checkout. GrantForgeUSA does not ask you to place card numbers, bank credentials, passwords, Social Security numbers, or protected health information in the project intake.",
       ],
       [
         "How information is used",
@@ -93,7 +88,7 @@ const LEGAL_PAGES = {
       ],
       [
         "Purchases and refunds",
-        "Payment purchases the selected drafting service and authorizes GrantForgeUSA to generate the full draft using the submitted intake. All sales are final and non-refundable except where a refund is required by applicable law. Correct your information and selected opportunity before submitting payment.",
+        "Payment purchases an immediately performed customized digital drafting service for the selected opportunity and authorizes GrantForgeUSA to begin generation using the submitted intake. Because the work is prepared specifically for the customer, all sales are final and non-refundable once generation begins except where required by applicable law or when GrantForgeUSA fails to deliver the purchased service. Funding denial, agency changes, customer ineligibility, or inaccurate customer-supplied information do not create a refund entitlement. GrantForgeUSA may correct or re-perform a technically defective delivery when appropriate.",
       ],
       [
         "Customer review and submission",
@@ -150,7 +145,7 @@ function Header() {
   return (
     <>
       <div className="service-banner">
-        Free grant matching and preview · Pay only when you select a full draft
+        Free grant matching and preview · One full proposal draft: $49.99
       </div>
       <header className="site-header">
         <div className="shell header-inner">
@@ -414,7 +409,7 @@ function LandingPage() {
   const [saleTerms, setSaleTerms] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
   const [checkingOut, setCheckingOut] = useState(false);
-  const serviceFee = serviceFeeFor(form.category, form.annualBudget);
+  const serviceFee = serviceFeeFor();
 
   function updateField(event) {
     const { name, value, type, checked } = event.target;
@@ -561,7 +556,7 @@ function LandingPage() {
               <span className="eyebrow">Federal grant matching + proposal drafting</span>
               <h1>Find the grant. See your fit. Preview the work.</h1>
               <p className="hero-lead">
-                Tell GrantForgeUSA about your organization and project. Our proprietary software screens federal opportunities, ranks the strongest matches, shows a preliminary qualification level, and gives you a proposal preview before you decide to purchase the full draft.
+                Tell GrantForgeUSA about the eligible applicant and project. Our proprietary software screens federal opportunities, ranks the strongest matches, shows a preliminary qualification level, and gives you a proposal preview before you decide to purchase the full draft.
               </p>
               <div className="button-row">
                 <a className="button primary" href="#start">Find grants free</a>
@@ -619,9 +614,9 @@ function LandingPage() {
               <strong>Free</strong>
               <p>Complete the intake and compare your returned matches.</p>
               <hr />
-              <span>Selected full proposal draft</span>
-              <strong>{PRICE_RANGE}</strong>
-              <p>Teacher: $9.99 · Organizations ≤$500k: $49.99 · $500k–$2M: $99.99 · Over $2M: $199.99. All sales final except where required by law.</p>
+              <span>One selected full proposal draft</span>
+              <strong>{FLAT_DRAFT_PRICE}</strong>
+              <p>One flat price for every supported applicant type and funding amount. Search, matching, official opportunity links, and the quick preview remain free. Customized drafting begins immediately after payment; final-sale terms apply.</p>
             </div>
           </div>
         </section>
@@ -644,23 +639,32 @@ function LandingPage() {
               <div className="form-stage"><span>1</span><strong>Organization</strong></div>
               <div className="form-grid">
                 <label>
-                  Organization name <em>*</em>
+                  Applicant / organization name <em>*</em>
                   <input name="organization" value={form.organization} onChange={updateField} required autoComplete="organization" />
                 </label>
                 <label>
                   Applicant type <em>*</em>
                   <select name="category" value={form.category} onChange={updateField} required>
                     <option value="">Select type</option>
-                    <option>Teacher (Classroom)</option>
-                    <option>School / District</option>
-                    <option>Church / Faith Org</option>
-                    <option>501c3 Nonprofit</option>
+                    <option>K-12 School / District / Educator</option>
+                    <option>College / University / Research Institution</option>
+                    <option>Church / Faith Organization</option>
+                    <option>501(c)(3) Nonprofit</option>
+                    <option>Nonprofit / Community Organization</option>
                     <option>Small Business</option>
-                    <option>City / Municipality</option>
-                    <option>Other</option>
+                    <option>For-Profit Organization</option>
+                    <option>City / County / Local Government</option>
+                    <option>State Government / Agency</option>
+                    <option>Tribal Government / Organization</option>
+                    <option>Public Housing Authority</option>
+                    <option>Individual / Independent Applicant</option>
+                    <option>Other Eligible Applicant</option>
                   </select>
-                  {form.category === "Teacher (Classroom)" && (
-                    <small className="field-guidance">Many federal opportunities require the school or district - not an individual teacher - to be the eligible applicant. Enter the school or district information where applicable.</small>
+                  {form.category === "K-12 School / District / Educator" && (
+                    <small className="field-guidance">Use the school or district that would be the legal applicant. A teacher or educator may be the contact when authorized by the applicant organization.</small>
+                  )}
+                  {form.category === "College / University / Research Institution" && (
+                    <small className="field-guidance">Use the institution as the applicant and the professor, principal investigator, dean, or grant administrator as the contact.</small>
                   )}
                 </label>
                 <label>
@@ -791,13 +795,13 @@ function LandingPage() {
 
                         <div className="checkout-summary">
                           <div><span>Selected draft</span><strong>{serviceFee}</strong></div>
-                          <p>Payment starts the full draft for the opportunity selected above.</p>
+                          <p>Payment starts the customized full-draft service immediately for the opportunity selected above.</p>
                         </div>
 
                         <label className="check-label purchase-check">
                           <input type="checkbox" checked={saleTerms} onChange={(event) => { setSaleTerms(event.target.checked); setCheckoutError(""); }} />
                           <span>
-                            I have checked my information and selected grant. I agree to the <a href="/terms" target="_blank">Terms</a> and understand all sales are final and non-refundable except where required by law.
+                            I have checked my information and selected grant. I agree to the <a href="/terms" target="_blank">Terms</a>, authorize GrantForgeUSA to begin the customized drafting service immediately after payment, and understand the $49.99 service is final and non-refundable once generation begins except where required by law or if GrantForgeUSA fails to deliver the purchased service. Funding is not guaranteed.
                           </span>
                         </label>
 

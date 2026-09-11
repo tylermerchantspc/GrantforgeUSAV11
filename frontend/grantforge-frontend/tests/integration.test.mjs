@@ -25,12 +25,12 @@ test("public customer flow exposes intake, matching, preview, checkout, and fulf
   assert.ok(appSource.includes('path === "/thanks"'));
 });
 
-test("approved public pricing tiers are present and legacy flat price is absent", () => {
-  for (const price of ["$9.99", "$49.99", "$99.99", "$199.99"]) {
-    assert.ok(appSource.includes(price), `missing ${price}`);
-  }
-  assert.equal(appSource.includes("$2,500"), false);
-  assert.ok(appSource.includes("serviceFeeFor"));
+test("one flat public draft price is used for every supported applicant", () => {
+  assert.ok(appSource.includes('const FLAT_DRAFT_PRICE = "$49.99"'));
+  assert.equal(appSource.includes("$9.99"), false);
+  assert.equal(appSource.includes("$99.99"), false);
+  assert.equal(appSource.includes("$199.99"), false);
+  assert.ok(appSource.includes("One flat price for every supported applicant type and funding amount"));
 });
 
 test("intake requires core organization and project information plus accuracy confirmation", () => {
@@ -66,13 +66,21 @@ test("match results expose qualification, official source, and preview before pa
 
 test("checkout requires final-sale and information-accuracy acknowledgement", () => {
   assert.ok(appSource.includes("I have checked my information and selected grant"));
-  assert.ok(appSource.includes("all sales are final and non-refundable except where required by law"));
+  assert.ok(appSource.includes("customized drafting service immediately after payment"));
+  assert.ok(appSource.includes("final and non-refundable once generation begins"));
   assert.ok(appSource.includes("Confirm the final-sale and information-accuracy terms before checkout"));
 });
 
 test("technology is positioned as proprietary software without public AI branding", () => {
   assert.ok(appSource.includes("proprietary software"));
   assert.equal(/\bAI\b/.test(appSource), false);
+});
+
+test("public intake includes higher education and no student-aid surface", () => {
+  assert.ok(appSource.includes("College / University / Research Institution"));
+  assert.ok(appSource.includes("principal investigator"));
+  assert.equal(/\bFAFSA\b/i.test(appSource), false);
+  assert.equal(/student aid/i.test(appSource), false);
 });
 
 test("frontend API client contains matching, preview, checkout, and delivery wiring", () => {

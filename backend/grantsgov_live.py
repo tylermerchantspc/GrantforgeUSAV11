@@ -24,10 +24,18 @@ DETAIL_URL = f"{API_BASE}/fetchOpportunity"
 USER_AGENT = "GrantForgeUSA/11.6 (+https://grantforgeusa.com)"
 
 APPLICANT_ELIGIBILITY_CODES = {
-    "EDU": ["05", "99"],
+    "EDU_K12": ["05", "99"],
+    "HIGHER_ED": ["06", "20", "99"],
+    "NONPROFIT_501C3": ["12", "99"],
     "NONPROFIT": ["12", "13", "99"],
     "SMALL_BUSINESS": ["23", "99"],
+    "FOR_PROFIT": ["22", "99"],
     "GOV_LOCAL": ["01", "02", "04", "99"],
+    "GOV_STATE": ["00", "99"],
+    "TRIBAL": ["07", "11", "99"],
+    "HOUSING": ["08", "99"],
+    "INDIVIDUAL": ["21", "99"],
+    "OTHER": ["25", "99"],
 }
 
 SECTOR_FUNDING_CODES = {
@@ -124,17 +132,10 @@ def _eligibility_tags(descriptions: Iterable[str]) -> List[str]:
         tags.extend(["small business", "for-profit"])
     if any(term in joined for term in ("nonprofit", "non-profit", "501(c)(3)", "community-based")):
         tags.extend(["nonprofit", "501(c)(3)", "community-based organization"])
-    if any(
-        term in joined
-        for term in (
-            "school district",
-            "independent school",
-            "public institution of higher education",
-            "private institution of higher education",
-            "education agencies",
-        )
-    ):
-        tags.extend(["school", "district", "education"])
+    if any(term in joined for term in ("school district", "independent school", "education agencies")):
+        tags.extend(["school", "district", "education", "k12"])
+    if any(term in joined for term in ("public institution of higher education", "private institution of higher education", "institution of higher education")):
+        tags.extend(["higher education", "college", "university", "research institution", "education"])
     if any(
         term in joined
         for term in (
