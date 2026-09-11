@@ -1,50 +1,86 @@
 """Live Grants.gov opportunity search adapter for GrantForgeUSA.
 
-Uses the public Grants.gov search2 and fetchOpportunity APIs. No API key is
-required for these two endpoints. The adapter returns records shaped like the
-legacy GrantForgeUSA grant dataset so the existing eligibility/scoring engine
-can rank them without exposing vendor-specific response structures upstream.
+Production matching uses the public Grants.gov search2 and fetchOpportunity APIs.
+Neither endpoint requires authentication. This adapter keeps Grants.gov as the
+source of truth and returns normalized records for the GrantForgeUSA screening
+engine.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 API_BASE = "https://api.grants.gov/v1/api"
 SEARCH_URL = f"{API_BASE}/search2"
 DETAIL_URL = f"{API_BASE}/fetchOpportunity"
-USER_AGENT = "GrantForgeUSA/11.5 (+https://grantforgeusa.com)"
+USER_AGENT = "GrantForgeUSA/11.6 (+https://grantforgeusa.com)"
+
+APPLICANT_ELIGIBILITY_CODES = {
+    "EDU": ["05", "99"],
+    "NONPROFIT": ["12", "13", "99"],
+    "SMALL_BUSINESS": ["23", "99"],
+    "GOV_LOCAL": ["01", "02", "04", "99"],
+}
+
+SECTOR_FUNDING_CODES = {
+    "education / STEM": ["ED", "ST"],
+    "workforce development": ["ELT"],
+    "telehealth / healthcare": ["HL"],
+    "housing / community development": ["HO", "CD"],
+    "public safety / emergency management": ["DPR", "LJL"],
+    "conservation / environment": ["ENV", "NR"],
+    "arts / culture": ["AR", "HU"],
+    "entrepreneurship / innovation": ["BC", "ST"],
+    "energy / manufacturing efficiency": ["EN", "BC"],
+    "agriculture / rural development": ["AG", "RD"],
+}
 
 
-def _post_json(url: str, payload: Dict[str, Any], timeout: float = 6.0) -> Dict[str, Any]:
+def _post_json(
+    url: str,
+    payload: Dict[str, Any],
+    timeout: float = 8.0,
+    attempts: int = 3,
+) -> Dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
-    request = Request(
-        url,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": USER_AGENT,
-        },
-    )
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            if response.status < 200 or response.status >= 300:
+    for attempt in range(attempts):
+        request = Request(
+            url,
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": USER_AGENT,
+            },
+        )
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                if 200 <= response.status < 300:
+                    return json.loads(response.read().decode("utf-8"))
+                if response.status not in (429, 500, 502, 503, 504):
+                    return {}
+        except HTTPError as exc:
+            if exc.code not in (429, 500, 502, 503, 504):
                 return {}
-            return json.loads(response.read().decode("utf-8"))
-    except (HTTPError, URLError, TimeoutError, ValueError, OSError):
-        return {}
+        except (URLError, TimeoutError, ValueError, OSError):
+            pass
+        if attempt < attempts - 1:
+            time.sleep(0.5 * (2**attempt))
+    return {}
 
 
 def _clean_text(value: Any) -> str:
-    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -111,8 +147,9 @@ def _eligibility_tags(descriptions: Iterable[str]) -> List[str]:
         )
     ):
         tags.extend(["municipality", "city", "county", "local government", "tribal"])
+    if "unrestricted" in joined:
+        tags.append("unrestricted")
 
-    # Keep the raw descriptions as eligibility evidence for the existing matcher.
     tags.extend(_clean_text(item) for item in descriptions if _clean_text(item))
     return list(dict.fromkeys(tag for tag in tags if tag))
 
@@ -121,25 +158,28 @@ def _detail_to_grant(hit: Dict[str, Any], detail: Dict[str, Any]) -> Dict[str, A
     data = detail.get("data") or {}
     synopsis = data.get("synopsis") or {}
     opportunity_id = data.get("id") or hit.get("id") or ""
-    title = data.get("opportunityTitle") or hit.get("title") or "Federal funding opportunity"
-    number = data.get("opportunityNumber") or hit.get("number") or ""
+    title = _clean_text(data.get("opportunityTitle") or hit.get("title") or "Federal funding opportunity")
+    number = _clean_text(data.get("opportunityNumber") or hit.get("number") or "")
 
-    applicant_types = [
-        item.get("description", "")
-        for item in (synopsis.get("applicantTypes") or [])
-        if isinstance(item, dict)
-    ]
-    activity_categories = [
-        item.get("description", "")
-        for item in (synopsis.get("fundingActivityCategories") or [])
-        if isinstance(item, dict)
-    ]
+    applicant_items = [item for item in (synopsis.get("applicantTypes") or []) if isinstance(item, dict)]
+    applicant_types = [_clean_text(item.get("description", "")) for item in applicant_items]
+    applicant_codes = [str(item.get("id") or "").strip() for item in applicant_items if str(item.get("id") or "").strip()]
+    activity_items = [item for item in (synopsis.get("fundingActivityCategories") or []) if isinstance(item, dict)]
+    activity_categories = [_clean_text(item.get("description", "")) for item in activity_items]
+    activity_codes = [str(item.get("id") or "").strip() for item in activity_items if str(item.get("id") or "").strip()]
     alns = [
-        " ".join(filter(None, [item.get("alnNumber", ""), item.get("programTitle", "")])).strip()
+        " ".join(filter(None, [_clean_text(item.get("alnNumber", "")), _clean_text(item.get("programTitle", ""))])).strip()
         for item in (data.get("alns") or [])
         if isinstance(item, dict)
     ]
 
+    eligibility_text = _clean_text(
+        synopsis.get("additionalInfoOnEligibility")
+        or synopsis.get("additionalInformationOnEligibility")
+        or synopsis.get("applicantEligibilityDesc")
+        or synopsis.get("eligibilityDesc")
+        or ""
+    )
     summary = _clean_text(
         synopsis.get("synopsisDesc")
         or synopsis.get("fundingDesc")
@@ -149,88 +189,151 @@ def _detail_to_grant(hit: Dict[str, Any], detail: Dict[str, Any]) -> Dict[str, A
     close_date = _iso_date(
         hit.get("closeDate")
         or synopsis.get("responseDate")
+        or synopsis.get("responseDateDesc")
         or data.get("originalDueDateDesc")
         or ""
     )
     max_amount = _parse_money(synopsis.get("awardCeiling") or synopsis.get("awardCeilingFormatted"))
+    min_amount = _parse_money(synopsis.get("awardFloor") or synopsis.get("awardFloorFormatted"))
 
-    searchable = " ".join([title, summary, *activity_categories, *alns])
+    searchable = " ".join([title, summary, eligibility_text, *activity_categories, *alns])
     tags = list(dict.fromkeys(re.findall(r"[A-Za-z0-9][A-Za-z0-9+-]{2,}", searchable.lower())))
 
     return {
         "title": title,
-        "program": (alns[0] if alns else hit.get("agencyName") or hit.get("agencyCode") or "Federal"),
+        "program": (alns[0] if alns else _clean_text(hit.get("agencyName") or hit.get("agencyCode") or "Federal")),
+        "agency": _clean_text(synopsis.get("agencyName") or hit.get("agencyName") or ""),
         "program_id": number,
         "program_url": f"https://www.grants.gov/search-results-detail/{opportunity_id}",
+        "official_url": f"https://www.grants.gov/search-results-detail/{opportunity_id}",
         "opp_id": str(opportunity_id),
         "opportunity_id": str(opportunity_id),
         "opp_number": number,
         "opportunity_number": number,
         "deadline": close_date,
         "close_date": close_date,
+        "min_amount": min_amount,
         "max_amount": max_amount,
         "eligible_types": _eligibility_tags(applicant_types),
         "eligibility": applicant_types,
-        "tags": tags[:160],
+        "eligibility_codes": applicant_codes,
+        "eligibility_text": eligibility_text,
+        "funding_category_codes": activity_codes,
+        "tags": tags[:200],
         "sector": " / ".join(activity_categories[:3]),
-        "summary": summary[:3000],
+        "summary": summary[:5000],
+        "cost_sharing_required": bool(synopsis.get("costSharing")) if synopsis.get("costSharing") is not None else None,
         "source": "Grants.gov live API",
-        "source_updated": synopsis.get("lastUpdatedDate") or "",
+        "source_updated": _clean_text(synopsis.get("lastUpdatedDate") or ""),
+        "status": str(hit.get("oppStatus") or "posted").lower(),
     }
 
 
-def _search_hits(keyword: str, rows: int = 25) -> List[Dict[str, Any]]:
-    response = _post_json(
-        SEARCH_URL,
-        {
-            "rows": rows,
-            "keyword": keyword,
-            "oppStatuses": "posted|forecasted",
-            "sortBy": "openDate|desc",
-        },
-    )
+def _search_hits(
+    keyword: str = "",
+    rows: int = 25,
+    eligibility_codes: Optional[List[str]] = None,
+    funding_codes: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    payload: Dict[str, Any] = {
+        "rows": rows,
+        "oppStatuses": "posted",
+        "sortBy": "openDate|desc",
+    }
+    if keyword.strip():
+        payload["keyword"] = keyword.strip()
+    if eligibility_codes:
+        payload["eligibilities"] = "|".join(dict.fromkeys(eligibility_codes))
+    if funding_codes:
+        payload["fundingCategories"] = "|".join(dict.fromkeys(funding_codes))
+
+    response = _post_json(SEARCH_URL, payload)
     if response.get("errorcode") not in (0, "0", None):
         return []
     return list(((response.get("data") or {}).get("oppHits") or []))
 
 
-def search_live_grants(keyword_text: str, max_details: int = 12) -> List[Dict[str, Any]]:
-    """Return current Grants.gov opportunities relevant to the user's intake.
+def _candidate_queries(keyword_text: str) -> List[str]:
+    parts = [part.strip() for part in re.split(r"[,;\n]", keyword_text or "") if part.strip()]
+    queries: List[str] = []
+    for part in parts:
+        if part not in queries:
+            queries.append(part)
+        words = [w for w in re.split(r"\s+", part) if len(w) >= 4]
+        for word in words[:3]:
+            if word.lower() not in {q.lower() for q in queries}:
+                queries.append(word)
+        if len(queries) >= 6:
+            break
+    return queries[:6]
 
-    Failure is intentionally represented as an empty list so the caller can use
-    its local verified fallback without making the customer-facing search fail.
+
+def search_live_grants(
+    keyword_text: str,
+    applicant_type: str = "",
+    sector: str = "",
+    max_details: int = 24,
+) -> List[Dict[str, Any]]:
+    """Return currently posted Grants.gov opportunities relevant to an intake.
+
+    Search uses applicant-type and funding-category filters when available,
+    fans out across several customer terms for recall, and never fabricates a
+    production result if Grants.gov returns no usable opportunity.
     """
-    phrases = [part.strip() for part in re.split(r"[,;\n]", keyword_text or "") if part.strip()]
-    primary = " ".join(phrases[:4]).strip()
-    if not primary:
-        return []
-
-    hits = _search_hits(primary)
-    if not hits and phrases:
-        # Grants.gov full-text search can be narrower than expected for a compound
-        # phrase. Fall back to the first strong intake term rather than returning
-        # nothing solely because the combined query was over-constrained.
-        hits = _search_hits(phrases[0])
+    queries = _candidate_queries(keyword_text)
+    eligibility_codes = APPLICANT_ELIGIBILITY_CODES.get(applicant_type, [])
+    funding_codes = SECTOR_FUNDING_CODES.get(sector, [])
 
     unique: Dict[str, Dict[str, Any]] = {}
-    for hit in hits:
-        if str(hit.get("oppStatus") or "").lower() not in ("posted", "forecasted", ""):
-            continue
-        opportunity_id = str(hit.get("id") or "").strip()
-        if opportunity_id:
-            unique.setdefault(opportunity_id, hit)
+
+    # First pass: customer terms + both applicant and sector filters.
+    for query in queries[:4]:
+        for hit in _search_hits(query, rows=15, eligibility_codes=eligibility_codes, funding_codes=funding_codes):
+            if str(hit.get("oppStatus") or "").lower() not in ("posted", ""):
+                continue
+            opp_id = str(hit.get("id") or "").strip()
+            if opp_id:
+                unique.setdefault(opp_id, hit)
+            if len(unique) >= max_details:
+                break
         if len(unique) >= max_details:
             break
+
+    # Second pass: keep applicant eligibility, relax only the funding category.
+    if len(unique) < min(8, max_details):
+        for query in queries[:4]:
+            for hit in _search_hits(query, rows=20, eligibility_codes=eligibility_codes):
+                if str(hit.get("oppStatus") or "").lower() not in ("posted", ""):
+                    continue
+                opp_id = str(hit.get("id") or "").strip()
+                if opp_id:
+                    unique.setdefault(opp_id, hit)
+                if len(unique) >= max_details:
+                    break
+            if len(unique) >= max_details:
+                break
+
+    # Final recall pass: filtered open opportunities even when Grants.gov full-text
+    # search is too strict for the customer's phrasing.
+    if len(unique) < min(5, max_details) and (eligibility_codes or funding_codes):
+        for hit in _search_hits("", rows=25, eligibility_codes=eligibility_codes, funding_codes=funding_codes):
+            if str(hit.get("oppStatus") or "").lower() not in ("posted", ""):
+                continue
+            opp_id = str(hit.get("id") or "").strip()
+            if opp_id:
+                unique.setdefault(opp_id, hit)
+            if len(unique) >= max_details:
+                break
 
     if not unique:
         return []
 
     grants: List[Dict[str, Any]] = []
-    workers = min(6, len(unique))
+    workers = min(4, len(unique))
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(_post_json, DETAIL_URL, {"opportunityId": int(opp_id)}): (opp_id, hit)
-            for opp_id, hit in unique.items()
+            for opp_id, hit in list(unique.items())[:max_details]
             if opp_id.isdigit()
         }
         for future in as_completed(futures):
