@@ -1,0 +1,114 @@
+name: One-time private release QA
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-private-release-qa.yml'
+permissions:
+  contents: read
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    env:
+      APP_MODE: development
+      LIVE_GRANTS_ENABLED: false
+      STRIPE_SECRET_KEY: sk_test_qa_placeholder
+      STRIPE_PUBLISHABLE_KEY: pk_test_qa_placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Verify deployed backend accepts final applicant model
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          payload = {
+            "organization":"Prairie State University",
+            "contactName":"Dr. Morgan Reed",
+            "contactEmail":"morgan.reed@example.edu",
+            "state":"MN",
+            "zip":"56001",
+            "category":"College / University / Research Institution",
+            "annualBudget":25000000,
+            "amountRequested":250000,
+            "projectTitle":"Rural Advanced Manufacturing Workforce Research Collaborative",
+            "keywords":"higher education, research, workforce, manufacturing, rural communities",
+            "timeline":"24 months",
+            "audience":"rural manufacturers, community college partners, and university researchers",
+            "need":"Rural manufacturers report persistent technical workforce shortages and limited access to applied research partnerships.",
+            "notes":"The university would lead applied research, employer engagement, curriculum translation, and dissemination with regional partners."
+          }
+          req = urllib.request.Request(
+            'https://grantforgeusa-v11-backend.onrender.com/questionnaire',
+            data=json.dumps(payload).encode(),
+            headers={'Content-Type':'application/json','User-Agent':'GrantForgeUSA-Private-QA/1.0'},
+            method='POST'
+          )
+          with urllib.request.urlopen(req, timeout=45) as response:
+            body = json.loads(response.read().decode())
+          print(json.dumps(body, indent=2))
+          if not body.get('ok'):
+            raise SystemExit('deployed backend rejected final higher-ed intake')
+          if body.get('organization') != payload['organization']:
+            raise SystemExit('deployed backend did not preserve applicant organization')
+          PY
+      - name: Generate production-style QA PDF
+        run: |
+          python - <<'PY'
+          import os
+          os.environ['LIVE_GRANTS_ENABLED'] = 'false'
+          from backend import v11_server as srv
+
+          intake = {
+            "organization":"Prairie State University",
+            "contactName":"Dr. Morgan Reed",
+            "contactEmail":"morgan.reed@example.edu",
+            "state":"MN",
+            "zip":"56001",
+            "category":"College / University / Research Institution",
+            "annualBudget":25000000,
+            "amountRequested":250000,
+            "projectTitle":"Rural Advanced Manufacturing Workforce Research Collaborative",
+            "keywords":"higher education, research, workforce, manufacturing, rural communities",
+            "timeline":"24 months",
+            "audience":"rural manufacturers, community college partners, and university researchers",
+            "need":"Rural manufacturers report persistent technical workforce shortages and limited access to applied research partnerships.",
+            "notes":"The university would lead applied research, employer engagement, curriculum translation, and dissemination with regional partners."
+          }
+          grant = {
+            "title":"Applied Research and Workforce Innovation Demonstration",
+            "program":"Federal Research Demonstration Program",
+            "agency":"Federal Agency",
+            "deadline":"2026-12-15",
+            "min_amount":100000,
+            "max_amount":500000,
+            "summary":"Supports eligible institutions of higher education conducting applied research and workforce innovation projects with measurable regional outcomes.",
+            "requires_match_percent":0,
+            "program_url":"https://www.grants.gov/search-results-detail/000000",
+          }
+          narrative = srv.build_narrative(intake, grant)
+          assert '20%' not in narrative and '70%' not in narrative and '90%' not in narrative
+          assert 'higher-education or research institution' in narrative
+          payload = {
+            **intake,
+            "draft_body": narrative,
+            "price": srv.price_for(intake['category'], intake['annualBudget']),
+            "grant_title": grant['title'],
+            "grant_program": grant['program'],
+            "grant_deadline": grant['deadline'],
+            "grant_url": grant['program_url'],
+            "recommendations": [grant],
+          }
+          path = srv.make_pdf('QA-PRIVATE-RELEASE-CANDIDATE', payload)
+          os.makedirs('qa-output', exist_ok=True)
+          target='qa-output/GrantForgeUSA_Private_Release_QA.pdf'
+          os.replace(path, target)
+          print(target)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: private-release-qa-pdf
+          path: qa-output/GrantForgeUSA_Private_Release_QA.pdf
+          if-no-files-found: error
