@@ -32,6 +32,7 @@ const INITIAL_FORM = {
   contactName: "",
   contactEmail: "",
   zip: "",
+  state: "",
   category: "",
   annualBudget: "",
   amountRequested: "",
@@ -264,6 +265,7 @@ function compactPreview(text) {
 
 function GrantCard({ grant, selected, onSelect, onPreview }) {
   const q = qualificationFor(grant);
+  const canPurchase = Boolean(grant.purchasable) && q.label !== "NO";
   return (
     <article className={`grant-card ${selected ? "selected" : ""}`}>
       <div className="grant-card-top">
@@ -281,10 +283,10 @@ function GrantCard({ grant, selected, onSelect, onPreview }) {
       </dl>
       <QualificationScale grant={grant} />
       <div className="grant-actions">
-        <button className="button primary" type="button" onClick={() => onPreview(grant)}>
-          Preview this draft
+        <button className="button primary" type="button" onClick={() => onPreview(grant)} disabled={!canPurchase}>
+          {canPurchase ? "Preview this draft" : "Not purchase-ready"}
         </button>
-        <button className="button secondary" type="button" onClick={() => onSelect(grant)}>
+        <button className="button secondary" type="button" onClick={() => onSelect(grant)} disabled={!canPurchase}>
           {selected ? "Selected" : "Select grant"}
         </button>
       </div>
@@ -424,6 +426,7 @@ function LandingPage() {
       contactName: source.contactName.trim(),
       contactEmail: source.contactEmail.trim(),
       zip: source.zip.trim(),
+      state: source.state.trim(),
       category: source.category,
       annualBudget: Number(source.annualBudget),
       amountRequested: Number(source.amountRequested),
@@ -493,7 +496,8 @@ function LandingPage() {
 
     if (matches.length) {
       document.getElementById("matches")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      await loadPreview(matches[0], payload);
+      const firstPurchaseReady = matches.find((grant) => grant.purchasable);
+      if (firstPurchaseReady) await loadPreview(firstPurchaseReady, payload);
     } else {
       setNotice("No matching federal opportunities were returned for this intake. Try refining the project keywords or funding request.");
     }
@@ -509,8 +513,8 @@ function LandingPage() {
   }
 
   async function beginCheckout() {
-    if (!selectedGrant) {
-      setCheckoutError("Select an opportunity before continuing to checkout.");
+    if (!selectedGrant || !selectedGrant.purchasable || qualificationFor(selectedGrant).label === "NO") {
+      setCheckoutError("Select a purchase-ready opportunity before continuing to checkout.");
       return;
     }
     if (!saleTerms) {
@@ -663,6 +667,13 @@ function LandingPage() {
                   <input type="email" name="contactEmail" value={form.contactEmail} onChange={updateField} required autoComplete="email" />
                 </label>
                 <label>
+                  State <em>*</em>
+                  <select name="state" value={form.state} onChange={updateField} required autoComplete="address-level1">
+                    <option value="">Select state</option>
+                    {[["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arkansas"],["CA","California"],["CO","Colorado"],["CT","Connecticut"],["DE","Delaware"],["FL","Florida"],["GA","Georgia"],["HI","Hawaii"],["ID","Idaho"],["IL","Illinois"],["IN","Indiana"],["IA","Iowa"],["KS","Kansas"],["KY","Kentucky"],["LA","Louisiana"],["ME","Maine"],["MD","Maryland"],["MA","Massachusetts"],["MI","Michigan"],["MN","Minnesota"],["MS","Mississippi"],["MO","Missouri"],["MT","Montana"],["NE","Nebraska"],["NV","Nevada"],["NH","New Hampshire"],["NJ","New Jersey"],["NM","New Mexico"],["NY","New York"],["NC","North Carolina"],["ND","North Dakota"],["OH","Ohio"],["OK","Oklahoma"],["OR","Oregon"],["PA","Pennsylvania"],["RI","Rhode Island"],["SC","South Carolina"],["SD","South Dakota"],["TN","Tennessee"],["TX","Texas"],["UT","Utah"],["VT","Vermont"],["VA","Virginia"],["WA","Washington"],["WV","West Virginia"],["WI","Wisconsin"],["WY","Wyoming"],["DC","District of Columbia"]].map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+                  </select>
+                </label>
+                <label>
                   ZIP code
                   <input name="zip" value={form.zip} onChange={updateField} inputMode="numeric" maxLength="10" autoComplete="postal-code" />
                 </label>
@@ -712,7 +723,7 @@ function LandingPage() {
                 <legend>Accuracy confirmation</legend>
                 <label className="check-label">
                   <input type="checkbox" name="accuracy" checked={form.accuracy} onChange={updateField} required />
-                  <span>I have reviewed the information above and confirm it is accurate to the best of my knowledge. I understand match levels are preliminary screening estimates and the official funding notice controls.</span>
+                  <span>I have reviewed the organization name, applicant type, state, budget, funding amount, and project information above and confirm it is accurate to the best of my knowledge. I understand match levels are preliminary screening estimates and the official funding notice controls.</span>
                 </label>
               </fieldset>
 

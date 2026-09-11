@@ -41,6 +41,7 @@ def _payload(org, keywords, category):
         "projectTitle": "Community Capacity Expansion",
         "timeline": "18 months",
         "audience": "low-income families and youth",
+        "state": "MN",
         "notes": "Cross-sector partnerships and evidence-based delivery",
     }
 
@@ -263,3 +264,21 @@ def test_download_token_rejects_non_owner_ip(client, monkeypatch):
         environ_overrides={"REMOTE_ADDR": "10.10.10.10"},
     )
     assert bad.status_code == 403
+
+
+def test_geography_blocks_appalachian_grant_for_minnesota():
+    grant = {"title": "Appalachian Regional Commission INSPIRE Initiative", "program": "ARC"}
+    ok, note = srv._geography_compatible(grant, "MN")
+    assert ok is False
+    assert "outside" in note.lower()
+
+def test_geography_allows_appalachian_state():
+    grant = {"title": "Appalachian Regional Commission INSPIRE Initiative", "program": "ARC"}
+    ok, _ = srv._geography_compatible(grant, "VA")
+    assert ok is True
+
+def test_funding_range_is_hard_gate():
+    grant = {"min_amount": 150000, "max_amount": 350000}
+    assert srv._funding_range_compatible(grant, 90000)[0] is False
+    assert srv._funding_range_compatible(grant, 200000)[0] is True
+    assert srv._funding_range_compatible(grant, 500000)[0] is False

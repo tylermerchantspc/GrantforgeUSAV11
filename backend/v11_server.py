@@ -233,10 +233,12 @@ def sanitize_payload(data: Dict[str, Any]) -> Dict[str, Any]:
         "notes",
         "need",
         "session_id",
+        "state",
+        "eligible_state",
     }
     out: Dict[str, Any] = {}
     for k, v in (data or {}).items():
-        if k in ("state", "eligible_state", "phone", "phoneNumber"):
+        if k in ("phone", "phoneNumber"):
             continue
         if k in ("amountRequested", "annualBudget"):
             out[k] = _sanitize_numeric(v, 0.0)
@@ -288,6 +290,7 @@ def _validate_required_intake(data: Dict[str, Any]) -> Optional[str]:
         "projectTitle": (data.get("projectTitle") or "").strip(),
         "timeline": (data.get("timeline") or "").strip(),
         "audience": (data.get("audience") or "").strip(),
+        "state": (data.get("state") or data.get("eligible_state") or "").strip(),
     }
     missing = [k for k, v in required.items() if not v or v == "0.0"]
     if missing:
@@ -300,6 +303,7 @@ def _validate_required_intake(data: Dict[str, Any]) -> Optional[str]:
             "projectTitle": "project title",
             "timeline": "timeline",
             "audience": "audience",
+            "state": "state",
         }
         return "Missing required field(s): " + ", ".join(labels[m] for m in missing)
     return None
@@ -609,6 +613,63 @@ def fraud_check(category: str, amount: float) -> Dict[str, Any]:
     return {"ok": True, "msg": ""}
 
 
+US_STATE_NAMES = {
+    "AL": "alabama", "AK": "alaska", "AZ": "arizona", "AR": "arkansas",
+    "CA": "california", "CO": "colorado", "CT": "connecticut", "DE": "delaware",
+    "FL": "florida", "GA": "georgia", "HI": "hawaii", "ID": "idaho",
+    "IL": "illinois", "IN": "indiana", "IA": "iowa", "KS": "kansas",
+    "KY": "kentucky", "LA": "louisiana", "ME": "maine", "MD": "maryland",
+    "MA": "massachusetts", "MI": "michigan", "MN": "minnesota", "MS": "mississippi",
+    "MO": "missouri", "MT": "montana", "NE": "nebraska", "NV": "nevada",
+    "NH": "new hampshire", "NJ": "new jersey", "NM": "new mexico", "NY": "new york",
+    "NC": "north carolina", "ND": "north dakota", "OH": "ohio", "OK": "oklahoma",
+    "OR": "oregon", "PA": "pennsylvania", "RI": "rhode island", "SC": "south carolina",
+    "SD": "south dakota", "TN": "tennessee", "TX": "texas", "UT": "utah",
+    "VT": "vermont", "VA": "virginia", "WA": "washington", "WV": "west virginia",
+    "WI": "wisconsin", "WY": "wyoming", "DC": "district of columbia",
+}
+
+ARC_STATES = {"AL", "GA", "KY", "MD", "MS", "NY", "NC", "OH", "PA", "SC", "TN", "VA", "WV"}
+
+def _normalize_state(value: str) -> str:
+    raw = (value or "").strip().lower()
+    if not raw:
+        return ""
+    for code, name in US_STATE_NAMES.items():
+        if raw == code.lower() or raw == name:
+            return code
+    return raw.upper() if len(raw) == 2 else ""
+
+def _geography_compatible(gr: Dict[str, Any], state_value: str) -> Tuple[bool, str]:
+    state = _normalize_state(state_value)
+    if not state:
+        return False, "State is required to verify geographic eligibility."
+    blob = " ".join([
+        str(gr.get("title") or ""),
+        str(gr.get("program") or ""),
+        str(gr.get("agency") or ""),
+        str(gr.get("eligibility_text") or ""),
+    ]).lower()
+    if "appalachian regional commission" in blob or re.search(r"\barc\b", blob):
+        if state not in ARC_STATES:
+            return False, "Applicant state is outside the Appalachian Regional Commission service area."
+    return True, ""
+
+def _funding_range_compatible(gr: Dict[str, Any], amount: float) -> Tuple[bool, str]:
+    minimum = _safe_float(gr.get("min_amount"), 0.0)
+    maximum = _safe_float(gr.get("max_amount"), 0.0)
+    if minimum > 0 and amount < minimum:
+        return False, f"Requested amount (${amount:,.0f}) is below this opportunity's minimum (${minimum:,.0f})."
+    if maximum > 0 and amount > maximum:
+        return False, f"Requested amount (${amount:,.0f}) exceeds this opportunity's maximum (${maximum:,.0f})."
+    return True, ""
+
+def _purchaseable_fit(gr: Dict[str, Any]) -> bool:
+    return gr.get("fit") in ("Strong Match", "Possible Match") and bool(gr.get("purchasable"))
+
+def _grant_key(gr: Dict[str, Any]) -> str:
+    return _first_identifier(gr, "opp_id", "opportunity_id", "opp_number", "opportunity_number") or str(gr.get("title") or "").strip().lower()
+
 def score_grant(
     gr: Dict[str, Any], category: str, kws: List[str], amount: float
 ) -> Dict[str, Any]:
@@ -713,6 +774,10 @@ def score_grant(
 def infer_client_sector(kws: List[str]) -> str:
     keyword_blob = " ".join(kws)
     sector_rules = [
+        (
+            "energy / manufacturing efficiency",
+            ["energy efficiency", "rural energy", "energy", "ventilation", "efficiency", "manufacturing equipment"],
+        ),
         (
             "telehealth / healthcare",
             [
@@ -902,17 +967,22 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     payload.pop("state", None)
     payload.pop("eligible_state", None)
 
-    grants = _read_json(GRANTS_PATH) or []
-    if APP_MODE == "production" and os.getenv("LIVE_GRANTS_ENABLED", "true").lower() != "false":
-        live_query = (payload.get("keywords") or payload.get("projectTitle") or "").strip()
-        live_grants = search_live_grants(live_query) if live_query else []
-        if live_grants:
-            grants = live_grants
-
     category = payload.get("category") or payload.get("who") or ""
     amount = _safe_float(payload.get("amountRequested"))
     applicant_type = normalize_applicant_type(category)
     kws = normalized_keywords(payload.get("keywords", ""))
+    requested_sector = infer_client_sector(kws)
+    state_value = payload.get("state") or payload.get("eligible_state") or ""
+
+    if APP_MODE == "production":
+        if os.getenv("LIVE_GRANTS_ENABLED", "true").lower() == "false":
+            return [], False
+        live_query = " ".join(filter(None, [payload.get("projectTitle", ""), payload.get("keywords", "")])).strip()
+        grants = search_live_grants(live_query, applicant_type=applicant_type, sector=requested_sector) if live_query else []
+        if not grants:
+            return [], False
+    else:
+        grants = _read_json(GRANTS_PATH) or []
     include_expired = bool(payload.get("includeExpired"))
 
     rows = []
@@ -928,12 +998,16 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
             if not include_expired and is_expired:
                 continue
 
-            if eligibility_required and not _is_eligible_for_applicant(
-                gr, applicant_type
-            ):
+            if eligibility_required and not _is_eligible_for_applicant(gr, applicant_type):
+                continue
+
+            geography_ok, geography_note = _geography_compatible(gr, state_value)
+            funding_ok, funding_note = _funding_range_compatible(gr, amount)
+            if not geography_ok or not funding_ok:
                 continue
 
             s = score_grant(gr, category, kws, amount)
+            purchasable = s["fit"] in ("Strong Match", "Possible Match")
 
             url = grant_display_url(gr)
             built.append(
@@ -955,6 +1029,9 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
                     "fit": s["fit"],
                     "score": s["score"],
                     "fit_notes": s["fit_notes"],
+                    "purchasable": purchasable,
+                    "screening_notes": " ".join(n for n in (geography_note, funding_note) if n),
+                    "min_amount": _safe_float(gr.get("min_amount"), 0),
                     "requires_match_percent": gr.get("requires_match_percent", 0),
                     "max_amount": _safe_float(gr.get("max_amount"), 0),
                     "tags": gr.get("tags", []),
@@ -976,16 +1053,9 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
         reverse=True,
     )
 
-    strong_rows = [
-        r for r in rows if r.get("fit") in ("Strong Match", "Possible Match")
-    ]
-    has_strong_matches = len(strong_rows) > 0
-    if len(strong_rows) >= 3:
-        federal_rows = strong_rows[:3]
-    else:
-        federal_rows = rows[:3]
-
-    return federal_rows, has_strong_matches
+    viable_rows = [r for r in rows if _purchaseable_fit(r)]
+    has_strong_matches = any(r.get("fit") == "Strong Match" for r in viable_rows)
+    return viable_rows[:3], has_strong_matches
 
 
 def _rotate_payment_log_if_needed() -> None:
@@ -1106,9 +1176,6 @@ def _mk_evaluation_lines(audience: str) -> List[str]:
 def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     """Build a polished, senior grant-writer narrative draft with structured sections."""
     intake = dict(intake or {})
-    intake.pop("state", None)
-    intake.pop("eligible_state", None)
-
     org = _organization_name(intake)
     proj_title = (intake.get("projectTitle") or "Strategic Initiative").strip()
     category = (intake.get("category") or intake.get("who") or "organization").strip()
@@ -1430,8 +1497,10 @@ def questionnaire():
     org = _organization_name(data)
     results, has_strong_matches = shortlist(data)
     notice = ""
-    if not has_strong_matches and results:
-        notice = "No direct federal matches found. Showing closest opportunities."
+    if results and not has_strong_matches:
+        notice = "Potential federal matches found. Review the fit notes and official notice carefully before purchasing."
+    elif not results:
+        notice = "No purchase-ready federal opportunity matched the information provided. Refine the project details, funding request, or search terms and try again."
     return jsonify(ok=True, organization=org, results=results, notice=notice)
 
 
@@ -1452,11 +1521,16 @@ def preview():
     if missing_err:
         return jsonify(ok=False, error=missing_err), 400
 
-    grant = data.get("grant") or {}
-    if not grant:
-        short, _ = shortlist(data)
-        if short:
-            grant = short[0]
+    requested_grant = data.get("grant") or {}
+    short, _ = shortlist(data)
+    if not short:
+        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422
+    grant = short[0]
+    if requested_grant:
+        requested_key = _grant_key(requested_grant)
+        grant = next((item for item in short if _grant_key(item) == requested_key), {})
+        if not grant:
+            return jsonify(ok=False, error="This opportunity no longer passes GrantForgeUSA screening for the submitted intake."), 422
 
     # Build full draft, then shorten for preview
     full_draft = build_narrative(data, grant)
@@ -1486,11 +1560,19 @@ def create_checkout_session():
     category = (data.get("category") or data.get("who") or "Other").strip()
     amount_req = _safe_float(data.get("amountRequested"))
     annual_budget = _safe_float(data.get("annualBudget"), 0)
-    grant = data.get("grant") or {}
+    requested_grant = data.get("grant") or {}
 
     chk = fraud_check(category, amount_req)
     if not chk["ok"]:
         return jsonify(ok=False, error=chk["msg"]), 400
+
+    short, _ = shortlist(data)
+    if not short:
+        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422
+    requested_key = _grant_key(requested_grant)
+    grant = next((item for item in short if _grant_key(item) == requested_key), {})
+    if not grant or not _purchaseable_fit(grant):
+        return jsonify(ok=False, error="Selected opportunity does not pass GrantForgeUSA purchase screening for this intake."), 422
 
     max_amt = _safe_float(grant.get("max_amount"), 0)
     if max_amt and amount_req > max_amt:
@@ -1529,6 +1611,7 @@ def create_checkout_session():
         "grant_url": grant_url,
         "projectTitle": (data.get("projectTitle") or "").strip(),
         "keywords": (data.get("keywords") or "").strip(),
+        "state": (data.get("state") or data.get("eligible_state") or "").strip(),
         "price": f"{price:.2f}",
         "refund_policy": "All sales final. No refunds.",
         "requester_ip": _client_ip(),
