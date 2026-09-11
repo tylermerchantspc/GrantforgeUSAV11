@@ -1,0 +1,71 @@
+name: One-time final relevance hardening
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-final-relevance-fix.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch live opportunity revalidation and relevance gates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          live = Path('backend/grantsgov_live.py')
+          s = live.read_text()
+          if 'def fetch_live_grant(' not in s:
+              s += '''\n\ndef fetch_live_grant(opportunity_id: str) -> Dict[str, Any]:\n    """Fetch and normalize one Grants.gov opportunity by its stable numeric id."""\n    opp_id = str(opportunity_id or "").strip()\n    if not opp_id.isdigit():\n        return {}\n    detail = _post_json(DETAIL_URL, {"opportunityId": int(opp_id)})\n    if not detail or not (detail.get("data") or {}).get("id"):\n        return {}\n    return _detail_to_grant({"id": opp_id}, detail)\n'''
+          live.write_text(s)
+
+          p = Path('backend/v11_server.py')
+          s = p.read_text()
+          s = s.replace('from backend.grantsgov_live import search_live_grants', 'from backend.grantsgov_live import fetch_live_grant, search_live_grants')
+
+          marker = 'def _purchaseable_fit(gr: Dict[str, Any]) -> bool:\n'
+          if 'def _relevance_compatible(' not in s:
+              insert = '''def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant_type: str) -> Tuple[bool, str]:\n    """Reject broad-keyword cross-domain matches before they reach a customer."""\n    grant_blob = " ".join([\n        str(gr.get("title") or ""), str(gr.get("summary") or ""),\n        " ".join(str(t) for t in gr.get("tags", [])), str(gr.get("sector") or ""),\n    ]).lower()\n    client_blob = " ".join([\n        str(payload.get("projectTitle") or ""), str(payload.get("keywords") or ""),\n        str(payload.get("need") or ""), str(payload.get("notes") or ""),\n    ]).lower()\n\n    broad = {\n        "project", "program", "support", "services", "community", "federal", "grant",\n        "funding", "technology", "equipment", "training", "workforce", "energy",\n        "business", "small", "rural", "development", "improve", "improvement",\n    }\n    client_terms = {\n        w for w in re.findall(r"[a-z0-9]+", client_blob)\n        if len(w) >= 5 and w not in broad\n    }\n    grant_terms = set(re.findall(r"[a-z0-9]+", grant_blob))\n    distinctive_overlap = client_terms & grant_terms\n\n    # Strong domain conflicts must be explicitly present in the customer's project.\n    conflict_terms = {"nuclear", "radioactive", "petroleum", "pipeline"}\n    if (conflict_terms & grant_terms) and not (conflict_terms & set(re.findall(r"[a-z0-9]+", client_blob))):\n        return False, "Opportunity subject matter conflicts with the submitted project."\n    if ("oil" in grant_terms or ("natural" in grant_terms and "gas" in grant_terms)) and not any(x in client_blob for x in ("oil", "natural gas", "petroleum")):\n        return False, "Opportunity is focused on oil/gas rather than the submitted project."\n    if "tribal" in grant_terms and "tribal" not in client_blob:\n        return False, "Opportunity is focused on Tribal programs not identified in the intake."\n\n    # Education and small-business searches are especially vulnerable to broad R&D terms.\n    required = 2 if applicant_type in ("EDU", "SMALL_BUSINESS") else 1\n    if len(distinctive_overlap) < required:\n        return False, "Insufficient project-specific overlap after removing broad search terms."\n    return True, ""\n\n\n'''
+              s = s.replace(marker, insert + marker, 1)
+
+          s = s.replace('def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:', 'def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = None) -> Tuple[List[Dict[str, Any]], bool]:')
+          old = '''    live_grants_enabled = os.getenv("LIVE_GRANTS_ENABLED", "true").lower() != "false"\n    if live_grants_enabled:\n        live_query = " ".join(filter(None, [payload.get("projectTitle", ""), payload.get("keywords", "")])).strip()\n        grants = search_live_grants(live_query, applicant_type=applicant_type, sector=requested_sector) if live_query else []\n        if not grants:\n            return [], False\n    else:\n        grants = _read_json(GRANTS_PATH) or []\n'''
+          new = '''    live_grants_enabled = os.getenv("LIVE_GRANTS_ENABLED", "true").lower() != "false"\n    if pinned_grant:\n        grants = [pinned_grant]\n    elif live_grants_enabled:\n        live_query = " ".join(filter(None, [payload.get("projectTitle", ""), payload.get("keywords", "")])).strip()\n        grants = search_live_grants(live_query, applicant_type=applicant_type, sector=requested_sector) if live_query else []\n        if not grants:\n            return [], False\n    else:\n        grants = _read_json(GRANTS_PATH) or []\n'''
+          if old not in s:
+              raise SystemExit('shortlist source block not found')
+          s = s.replace(old, new, 1)
+
+          old_gate = '''            geography_ok, geography_note = _geography_compatible(gr, state_value)\n            funding_ok, funding_note = _funding_range_compatible(gr, amount)\n            if not geography_ok or not funding_ok:\n                continue\n\n            s = score_grant(gr, category, kws, amount)\n'''
+          new_gate = '''            geography_ok, geography_note = _geography_compatible(gr, state_value)\n            funding_ok, funding_note = _funding_range_compatible(gr, amount)\n            relevance_ok, relevance_note = _relevance_compatible(gr, payload, applicant_type)\n            if not geography_ok or not funding_ok or not relevance_ok:\n                continue\n\n            s = score_grant(gr, category, kws, amount)\n'''
+          if old_gate not in s:
+              raise SystemExit('screen gate block not found')
+          s = s.replace(old_gate, new_gate, 1)
+          s = s.replace('"screening_notes": " ".join(n for n in (geography_note, funding_note) if n),', '"screening_notes": " ".join(n for n in (geography_note, funding_note, relevance_note) if n),')
+
+          old_preview = '''    requested_grant = data.get("grant") or {}\n    short, _ = shortlist(data)\n    if not short:\n        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422\n    grant = short[0]\n    if requested_grant:\n        requested_key = _grant_key(requested_grant)\n        grant = next((item for item in short if _grant_key(item) == requested_key), {})\n        if not grant:\n            return jsonify(ok=False, error="This opportunity no longer passes GrantForgeUSA screening for the submitted intake."), 422\n'''
+          new_preview = '''    requested_grant = data.get("grant") or {}\n    pinned = {}\n    requested_id = _first_identifier(requested_grant, "opp_id", "opportunity_id")\n    if requested_id and "Grants.gov" in str(requested_grant.get("source") or ""):\n        pinned = fetch_live_grant(requested_id)\n    short, _ = shortlist(data, pinned_grant=pinned or None)\n    if not short:\n        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422\n    grant = short[0]\n    if requested_grant:\n        requested_key = _grant_key(requested_grant)\n        grant = next((item for item in short if _grant_key(item) == requested_key), {})\n        if not grant:\n            return jsonify(ok=False, error="This opportunity no longer passes GrantForgeUSA screening for the submitted intake."), 422\n'''
+          if old_preview not in s:
+              raise SystemExit('preview block not found')
+          s = s.replace(old_preview, new_preview, 1)
+
+          old_checkout = '''    short, _ = shortlist(data)\n    if not short:\n        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422\n    requested_key = _grant_key(requested_grant)\n'''
+          new_checkout = '''    pinned = {}\n    requested_id = _first_identifier(requested_grant, "opp_id", "opportunity_id")\n    if requested_id and "Grants.gov" in str(requested_grant.get("source") or ""):\n        pinned = fetch_live_grant(requested_id)\n    short, _ = shortlist(data, pinned_grant=pinned or None)\n    if not short:\n        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422\n    requested_key = _grant_key(requested_grant)\n'''
+          if old_checkout not in s:
+              raise SystemExit('checkout block not found')
+          s = s.replace(old_checkout, new_checkout, 1)
+
+          # Reserve more bottom-page room so wrapped narrative cannot collide with the footer.
+          s = s.replace('    bottom_margin = 60\n', '    bottom_margin = 96\n', 1)
+          s = s.replace('            bottom_margin - 12,\n', '            48,\n', 1)
+
+          p.write_text(s)
+          PY
+          git config user.name "GrantForgeUSA automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/grantsgov_live.py backend/v11_server.py
+          git commit -m "Tighten project relevance and stable opportunity revalidation"
+          git push origin HEAD:main
