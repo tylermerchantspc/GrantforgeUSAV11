@@ -1,0 +1,36 @@
+name: One-time final deployed relevance smoke
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-final-deployed-relevance-smoke.yml'
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify cross-domain false positives are gone
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          base='https://grantforgeusa-v11-backend.onrender.com'
+          cases=[
+            {
+              'name':'teacher','organization':'Prairie Ridge Middle School Classroom','contactName':'Amanda Cole','contactEmail':'amanda.cole@example.com','state':'MN','zip':'56031','category':'Teacher (Classroom)','annualBudget':120000,'amountRequested':18000,'projectTitle':'Rural Robotics Discovery Lab','keywords':'STEM, robotics, technology, equipment','timeline':'2026-2027 school year','audience':'grades 6-8 students in a rural public school','need':'Students have limited access to hands-on robotics, coding equipment, and project-based STEM connected to technical careers.','notes':'Reusable robotics kits, teacher implementation support, and measurable student skill growth.'
+            },
+            {
+              'name':'small_business','organization':'North Star Fabrication LLC','contactName':'Daniel Brooks','contactEmail':'daniel.brooks@example.com','state':'MN','zip':'56101','category':'Small Business','annualBudget':380000,'amountRequested':90000,'projectTitle':'Rural Manufacturing Energy Upgrade','keywords':'small business, rural energy, energy efficiency, manufacturing','timeline':'12 months','audience':'employees and customers of a rural metal fabrication business','need':'Older fabrication and ventilation equipment raises energy costs and limits operating efficiency.','notes':'Energy-efficient equipment and ventilation upgrades to reduce utility expense and improve production efficiency.'
+            }
+          ]
+          forbidden=['oil and natural gas','nuclear energy licensing','radioactive materials transportation']
+          for case in cases:
+            name=case.pop('name')
+            req=urllib.request.Request(base+'/questionnaire',data=json.dumps(case).encode(),headers={'Content-Type':'application/json','User-Agent':'GrantForgeUSA-Final-Smoke/1.0'},method='POST')
+            with urllib.request.urlopen(req,timeout=40) as r:
+              body=r.read().decode()
+              print(name.upper(),body)
+              low=body.lower()
+              for term in forbidden:
+                if term in low:
+                  raise SystemExit(f'{name}: forbidden false-positive remains: {term}')
+          PY
