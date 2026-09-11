@@ -52,10 +52,8 @@ jobs:
               'notes':'The applicant is a public, state-controlled, accredited university. It plans a single-function education and extension project in food and agricultural sciences led by faculty and extension educators with secondary and community-college partners.'
           }
 
-          # Wait through a Render rolling deploy. Current code must route this as agriculture,
-          # use the precise public-higher-ed applicant class, and avoid the prior Air Force false positives.
           results = []
-          for attempt in range(8):
+          for attempt in range(10):
               st, out = post('/questionnaire', positive)
               assert st == 200 and out.get('ok') is True, (st, out)
               results = out.get('results') or []
@@ -69,9 +67,6 @@ jobs:
           blob = json.dumps(results).lower()
           assert 'air force fiscal year 2027 young investigator' not in blob
           assert 'air force basic research sciences conference' not in blob
-
-          # Prefer the current AFRI Education & Workforce Development opportunity, which the
-          # official notice supports for qualifying colleges/universities and agricultural education/workforce projects.
           target = next((r for r in results if str(r.get('opp_id')) == '361169'), results[0])
           assert target.get('purchasable') is True
           assert target.get('fit') in ('Strong Match','Possible Match')
@@ -99,9 +94,14 @@ jobs:
           negatives = [
               ('MEMORIAL', {'organization':'Martin County Veterans','category':'501(c)(3) Nonprofit','state':'Minnesota','annualBudget':90000,'projectTitle':'Purple Heart Statue','amountRequested':50000,'timeline':'May 2027','audience':'Local veterans and travelers to Martin County','keywords':'memorial, veterans, park','need':'Install a memorial at the county veterans park recognizing the cost of war.','notes':'Local veterans organizations may assist.'}),
               ('ROBOTICS', {'organization':'Prairie Ridge Middle School','category':'K-12 School / District / Educator','state':'Minnesota','annualBudget':120000,'projectTitle':'Rural Robotics Discovery Lab','amountRequested':18000,'timeline':'2026-2027 school year','audience':'Middle school students','keywords':'STEM, robotics, classroom technology, equipment','need':'Expand hands-on robotics and engineering learning.','notes':'School-based instructional project.'}),
-              ('ENERGY', {'organization':'North Star Fabrication LLC','category':'Small Business','state':'Minnesota','annualBudget':380000,'projectTitle':'Rural Manufacturing Energy Upgrade','amountRequested':90000,'timeline':'12 months','audience':'Manufacturing employees and customers','keywords':'small business, rural energy, energy efficiency, manufacturing','need':'Reduce energy use in a rural manufacturing operation.','notes':'Equipment efficiency and operational improvements.'}),
+              ('ENERGY', {'organization':'North Star Fabrication LLC','category':'Small Business','state':'Minnesota','annualBudget':380000,'projectTitle':'Rural Manufacturing Energy Upgrade','amountRequested':90000,'timeline':'12 months','audience':'Manufacturing employees and customers','keywords':'small business, rural energy, energy efficiency, manufacturing','need':'Reduce energy use in a rural manufacturing operation.','notes':'Capital equipment efficiency and operational improvements; this is not an R&D, chemical-technology, prototype, or pilot project.'}),
           ]
-          forbidden = ('advancing oil and natural gas production','advanced nuclear energy licensing','radioactive materials transportation')
+          forbidden = (
+              'advancing oil and natural gas production',
+              'advanced nuclear energy licensing',
+              'radioactive materials transportation',
+              'accelerating scale-up and pre-piloting of emerging chemical technologies',
+          )
           for label, payload in negatives:
               st, out = post('/questionnaire', payload)
               assert st == 200 and out.get('ok') is True, (label, st, out)
@@ -110,5 +110,5 @@ jobs:
               for phrase in forbidden:
                   assert phrase not in text, (label, phrase, out)
 
-          print('FINAL_DEPLOYED_ACCEPTANCE_PASS')
+          print('FINAL_DEPLOYED_ACCEPTANCE_PASS_V3')
           PY
