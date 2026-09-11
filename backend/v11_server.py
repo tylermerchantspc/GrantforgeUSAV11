@@ -503,11 +503,11 @@ def _safe_grants_url(url: str) -> Optional[str]:
     if (
         "apply07.grants.gov" in lowered
         or "grantsws/rest/opportunities/details" in lowered
-        or "search-results-detail/" in lowered
     ):
         return None
     if not (
         lowered.startswith("https://www.grants.gov/opportunity/details/")
+        or lowered.startswith("https://www.grants.gov/search-results-detail/")
         or lowered.startswith("https://www.grants.gov/search-results?query=")
     ):
         return None
@@ -580,36 +580,9 @@ def price_for(category: str, annual_budget: float) -> float:
 
 
 def fraud_check(category: str, amount: float) -> Dict[str, Any]:
-    """Simple guardrails by category. Return {ok: bool, msg: str}."""
-    c = (category or "").lower()
-    limits: List[Tuple[str, bool]] = []
-
-    if c.startswith("teacher"):
-        limits.append(("Teachers are limited to $15,000 per draft.", amount <= 15_000))
-    elif "school" in c or "district" in c:
-        limits.append(
-            ("Schools/Districts are limited to $250,000 per draft.", amount <= 250_000)
-        )
-    elif "church" in c or "faith" in c:
-        limits.append(
-            ("Faith orgs are limited to $150,000 per draft.", amount <= 150_000)
-        )
-    elif "501" in c or "nonprofit" in c:
-        limits.append(
-            ("Nonprofits are limited to $500,000 per draft.", amount <= 500_000)
-        )
-    else:
-        limits.append(
-            ("Other orgs are limited to $350,000 per draft.", amount <= 350_000)
-        )
-
-    for msg, ok in limits:
-        if not ok:
-            return {"ok": False, "msg": msg}
-
+    """Basic transaction sanity checks; grant-specific limits belong to the official notice."""
     if amount <= 0:
         return {"ok": False, "msg": "Requested amount must be greater than 0."}
-
     return {"ok": True, "msg": ""}
 
 
@@ -761,13 +734,13 @@ def score_grant(
             f"Requires approximately {req_match}% local match (cash or in-kind)."
         )
 
+    if kws and overlap:
+        score += min(len(set(overlap)), 4) * 2
     fit = (
         "Strong Match"
         if score >= 130
         else "Possible Match" if score >= 95 else "Low Match"
     )
-    if kws and overlap:
-        score += min(len(set(overlap)), 4) * 2
     return {"score": score, "fit": fit, "fit_notes": " ".join(fit_notes)}
 
 
@@ -925,6 +898,8 @@ def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
         return False
 
     elig = " ".join([str(e).lower() for e in gr.get("eligible_types", [])])
+    if "unrestricted" in elig:
+        return True
     if applicant_type == "SMALL_BUSINESS":
         return any(
             t in elig
@@ -964,9 +939,6 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     Production queries the live Grants.gov API first and uses the local dataset only as a resilient fallback.
     """
     payload = dict(payload or {})
-    payload.pop("state", None)
-    payload.pop("eligible_state", None)
-
     category = payload.get("category") or payload.get("who") or ""
     amount = _safe_float(payload.get("amountRequested"))
     applicant_type = normalize_applicant_type(category)
@@ -992,8 +964,6 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
         for gr in grants:
             # hide expired unless explicitly requested
             close_date = gr.get("close_date") or gr.get("deadline") or ""
-            if _safe_float(gr.get("max_amount"), 0) > 2_000_000:
-                continue
             is_expired = _is_expired(close_date)
             if not include_expired and is_expired:
                 continue

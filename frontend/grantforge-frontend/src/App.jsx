@@ -274,12 +274,14 @@ function GrantCard({ grant, selected, onSelect, onPreview }) {
       </div>
       <h3>{grant.title || "Federal funding opportunity"}</h3>
       <p className="grant-summary">
-        {grant.summary || grant.fit_notes || "Review the official notice and GrantForgeUSA preview for program details."}
+        {grant.summary || "Review the official notice and GrantForgeUSA preview for program details."}
       </p>
+      {grant.fit_notes && <p className="fit-explanation"><strong>Why this match:</strong> {grant.fit_notes}</p>}
       <dl className="grant-meta">
         <div><dt>Maximum award</dt><dd>{formatMoney(grant.max_amount)}</dd></div>
         <div><dt>Deadline</dt><dd>{grant.deadline || "TBA"}</dd></div>
         <div><dt>Level</dt><dd>{grant.level || "Federal"}</dd></div>
+        <div><dt>Source</dt><dd>{String(grant.source || "").includes("Grants.gov") ? "Live Grants.gov" : "Verified federal data"}</dd></div>
       </dl>
       <QualificationScale grant={grant} />
       <div className="grant-actions">

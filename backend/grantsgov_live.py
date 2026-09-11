@@ -154,6 +154,14 @@ def _eligibility_tags(descriptions: Iterable[str]) -> List[str]:
     return list(dict.fromkeys(tag for tag in tags if tag))
 
 
+def _canonical_sector(activity_codes: Iterable[str]) -> str:
+    code_set = {str(code or "").strip() for code in activity_codes}
+    for sector, codes in SECTOR_FUNDING_CODES.items():
+        if code_set.intersection(codes):
+            return sector
+    return ""
+
+
 def _detail_to_grant(hit: Dict[str, Any], detail: Dict[str, Any]) -> Dict[str, Any]:
     data = detail.get("data") or {}
     synopsis = data.get("synopsis") or {}
@@ -220,7 +228,8 @@ def _detail_to_grant(hit: Dict[str, Any], detail: Dict[str, Any]) -> Dict[str, A
         "eligibility_text": eligibility_text,
         "funding_category_codes": activity_codes,
         "tags": tags[:200],
-        "sector": " / ".join(activity_categories[:3]),
+        "sector": _canonical_sector(activity_codes),
+        "sector_labels": activity_categories[:3],
         "summary": summary[:5000],
         "cost_sharing_required": bool(synopsis.get("costSharing")) if synopsis.get("costSharing") is not None else None,
         "source": "Grants.gov live API",
