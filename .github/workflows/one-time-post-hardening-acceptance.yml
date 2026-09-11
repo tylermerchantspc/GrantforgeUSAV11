@@ -1,0 +1,93 @@
+name: One-time post-hardening acceptance
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-post-hardening-acceptance.yml'
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run three deployed customer cases
+        env:
+          BASE_URL: https://grantforgeusa-v11-backend.onrender.com
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request, urllib.error
+
+          base = os.environ['BASE_URL'].rstrip('/')
+          cases = [
+              {
+                  'case':'teacher',
+                  'organization':'Prairie Ridge Middle School Classroom',
+                  'contactName':'Amanda Cole','contactEmail':'amanda.cole@example.com',
+                  'state':'MN','zip':'56031','category':'Teacher (Classroom)',
+                  'annualBudget':120000,'amountRequested':18000,
+                  'projectTitle':'Rural Robotics Discovery Lab',
+                  'keywords':'STEM, robotics, technology, equipment',
+                  'timeline':'2026-2027 school year',
+                  'audience':'grades 6-8 students in a rural public school',
+                  'need':'Students have limited access to hands-on robotics, coding equipment, and project-based STEM connected to technical careers.',
+                  'notes':'The school wants reusable robotics kits, teacher implementation support, and measurable student skill growth.'
+              },
+              {
+                  'case':'nonprofit',
+                  'organization':'River Valley Youth Works',
+                  'contactName':'Marcus Green','contactEmail':'marcus.green@example.org',
+                  'state':'MN','zip':'56001','category':'501c3 Nonprofit',
+                  'annualBudget':760000,'amountRequested':125000,
+                  'projectTitle':'Rural Youth Apprenticeship Bridge',
+                  'keywords':'workforce, apprenticeship, rural youth, training',
+                  'timeline':'18 months',
+                  'audience':'low-income rural youth ages 16-24',
+                  'need':'Transportation, employer-access, and skills barriers limit entry into registered apprenticeships and stable career pathways.',
+                  'notes':'The organization plans employer partnerships, career coaching, transportation support, and credential-linked training.'
+              },
+              {
+                  'case':'small_business',
+                  'organization':'North Star Fabrication LLC',
+                  'contactName':'Daniel Brooks','contactEmail':'daniel.brooks@example.com',
+                  'state':'MN','zip':'56101','category':'Small Business',
+                  'annualBudget':380000,'amountRequested':90000,
+                  'projectTitle':'Rural Manufacturing Energy Upgrade',
+                  'keywords':'small business, rural energy, energy efficiency, manufacturing',
+                  'timeline':'12 months',
+                  'audience':'employees and customers of a rural metal fabrication business',
+                  'need':'Older fabrication and ventilation equipment raises energy costs and limits operating efficiency.',
+                  'notes':'The business wants energy-efficient equipment and ventilation upgrades that reduce utility expense and improve production efficiency.'
+              },
+          ]
+
+          def post(path, payload):
+              req = urllib.request.Request(
+                  base + path,
+                  data=json.dumps(payload).encode('utf-8'),
+                  headers={'Content-Type':'application/json','User-Agent':'GrantForgeUSA-Acceptance/1.0'},
+                  method='POST',
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=35) as r:
+                      return r.status, json.loads(r.read().decode('utf-8'))
+              except urllib.error.HTTPError as e:
+                  body = e.read().decode('utf-8', errors='replace')
+                  try: data = json.loads(body)
+                  except Exception: data = {'raw':body}
+                  return e.code, data
+
+          print('ACCEPTANCE_BEGIN')
+          for case in cases:
+              payload = {k:v for k,v in case.items() if k != 'case'}
+              status, result = post('/questionnaire', payload)
+              record = {'case':case['case'],'questionnaire_status':status,'intake':payload,'questionnaire':result}
+              matches = result.get('results') if isinstance(result, dict) else None
+              if isinstance(matches, list) and matches:
+                  purchase = next((g for g in matches if g.get('purchasable')), None)
+                  if purchase:
+                      pstatus, preview = post('/preview', {**payload, 'grant':purchase})
+                      record['selected_grant'] = purchase
+                      record['preview_status'] = pstatus
+                      record['preview'] = preview
+              print('CASE_JSON=' + json.dumps(record, separators=(',',':'), sort_keys=True))
+          print('ACCEPTANCE_END')
+          PY
