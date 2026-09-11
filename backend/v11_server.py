@@ -1537,7 +1537,7 @@ def preview():
     requested_id = _first_identifier(requested_grant, "opp_id", "opportunity_id")
     if requested_id and "Grants.gov" in str(requested_grant.get("source") or ""):
         pinned = fetch_live_grant(requested_id)
-    short, _ = shortlist(data, pinned_grant=pinned or None)
+    short, _ = shortlist(data, pinned_grant=pinned) if pinned else shortlist(data)
     if not short:
         return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422
     grant = short[0]
@@ -1585,7 +1585,7 @@ def create_checkout_session():
     requested_id = _first_identifier(requested_grant, "opp_id", "opportunity_id")
     if requested_id and "Grants.gov" in str(requested_grant.get("source") or ""):
         pinned = fetch_live_grant(requested_id)
-    short, _ = shortlist(data, pinned_grant=pinned or None)
+    short, _ = shortlist(data, pinned_grant=pinned) if pinned else shortlist(data)
     if not short:
         return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422
     requested_key = _grant_key(requested_grant)
