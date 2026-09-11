@@ -105,6 +105,18 @@ def _parse_money(value: Any) -> float:
         return 0.0
 
 
+def _parse_boolish(value: Any) -> Optional[bool]:
+    """Parse Grants.gov yes/no style fields without treating non-empty strings as True."""
+    if isinstance(value, bool):
+        return value
+    raw = str(value or "").strip().lower()
+    if raw in {"yes", "y", "true", "1", "required"}:
+        return True
+    if raw in {"no", "n", "false", "0", "not required"}:
+        return False
+    return None
+
+
 def _iso_date(value: Any) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -236,7 +248,7 @@ def _detail_to_grant(hit: Dict[str, Any], detail: Dict[str, Any]) -> Dict[str, A
         "sector": _canonical_sector(activity_codes),
         "sector_labels": activity_categories[:3],
         "summary": summary[:5000],
-        "cost_sharing_required": bool(synopsis.get("costSharing")) if synopsis.get("costSharing") is not None else None,
+        "cost_sharing_required": _parse_boolish(synopsis.get("costSharing")),
         "source": "Grants.gov live API",
         "source_updated": _clean_text(synopsis.get("lastUpdatedDate") or ""),
         "status": str(hit.get("oppStatus") or "posted").lower(),

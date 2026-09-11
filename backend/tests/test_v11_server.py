@@ -402,3 +402,43 @@ def test_grants_serving_students_are_not_mistaken_for_student_applicant_programs
     }
     assert srv._student_applicant_opportunity(institutional) is False
     assert srv._is_eligible_for_applicant(institutional, "EDU_K12") is True
+
+
+
+def test_restrictive_additional_eligibility_can_narrow_dedicated_code():
+    restricted_nonprofit = {
+        "eligibility_codes": ["12", "25"],
+        "eligibility_text": "The following types of organizations are eligible to receive direct awards: CSBG state associations, tribes and territories funded directly in FY 2025.",
+    }
+    assert srv._is_eligible_for_applicant(restricted_nonprofit, "NONPROFIT_501C3") is False
+
+
+def test_restrictive_additional_eligibility_keeps_named_applicant_class():
+    restricted_local = {
+        "eligibility_codes": ["01", "02", "04", "25"],
+        "eligibility_text": "Eligible applicants are limited to States; units of local government; and tribal governments.",
+    }
+    assert srv._is_eligible_for_applicant(restricted_local, "GOV_LOCAL") is True
+
+
+def test_named_state_list_rejects_out_of_area_applicant():
+    grant = {
+        "title": "Manufacturing Extension Program",
+        "summary": "Establish and operate a center in the States of Alabama, Alaska, Arkansas, California, Georgia, Louisiana, Massachusetts, Missouri, Montana, Ohio, Pennsylvania, Utah and Vermont.",
+    }
+    assert srv._geography_compatible(grant, "MN")[0] is False
+    assert srv._geography_compatible(grant, "AL")[0] is True
+
+
+def test_narrative_flags_required_cost_sharing_without_inventing_percentage():
+    grant = {
+        "title": "Rural STEM Opportunity",
+        "program": "NIFA",
+        "deadline": "2026-09-30",
+        "max_amount": 200000,
+        "cost_sharing_required": True,
+    }
+    payload = _payload("Example University", "stem, agriculture, rural", "College / University / Research Institution")
+    text = srv.build_narrative(payload, grant)
+    assert "cost sharing or matching is required" in text
+    assert "must be verified" in text
