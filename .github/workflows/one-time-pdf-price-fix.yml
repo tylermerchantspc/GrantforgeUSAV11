@@ -1,0 +1,43 @@
+name: One-time PDF price fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-pdf-price-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Replace obsolete PDF flat-price reference
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('backend/v11_server.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'f"Service fee: ${FLAT_PRICE:,.2f}",'
+          new = 'f"Service fee: ${_safe_float(payload.get(\"price\"), 0):,.2f}",'
+          if old not in text:
+              raise SystemExit('Expected obsolete PDF price reference was not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+      - name: Verify
+        run: |
+          python -m py_compile backend/v11_server.py
+          ! grep -q 'FLAT_PRICE' backend/v11_server.py
+      - name: Commit fix
+        run: |
+          git config user.name 'GrantForgeUSA automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add backend/v11_server.py
+          git commit -m 'Use paid tier price in generated proposal PDF'
+          git push origin main
