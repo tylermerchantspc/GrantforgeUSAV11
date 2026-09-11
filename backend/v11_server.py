@@ -702,6 +702,21 @@ def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant
     if "tribal" in grant_terms and "tribal" not in client_blob:
         return False, "Opportunity is focused on Tribal programs not identified in the intake."
 
+    # Do not confuse capital/operational improvement projects with research, prototype,
+    # emerging-technology, scale-up, or pre-pilot funding simply because both mention
+    # manufacturing, energy, equipment, or technology.
+    rd_signals = (
+        "research and development", "research & development", "r&d", "prototype",
+        "pre-pilot", "prepilot", "pre-piloting", "scale-up", "scale up",
+        "emerging chemical technolog", "technology demonstration", "proof of concept",
+    )
+    client_rd_signals = (
+        "research", "r&d", "prototype", "pilot", "scale-up", "scale up",
+        "chemical technolog", "demonstration", "proof of concept", "commercialization",
+    )
+    if any(term in grant_blob for term in rd_signals) and not any(term in client_blob for term in client_rd_signals):
+        return False, "Opportunity requires an R&D/pilot project not identified in the submitted project."
+
     # Education and small-business searches are especially vulnerable to broad R&D terms.
     required = 2 if applicant_type in ("EDU_K12", "HIGHER_ED", "HIGHER_ED_PUBLIC", "HIGHER_ED_PRIVATE", "RESEARCH_INSTITUTION", "SMALL_BUSINESS", "FOR_PROFIT") else 1
     if len(distinctive_overlap) < required:

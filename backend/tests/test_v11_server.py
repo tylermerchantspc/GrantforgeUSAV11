@@ -465,3 +465,37 @@ def test_research_institution_requires_unrestricted_or_other_text_confirmation()
     generic_public = {"eligibility_codes": ["06"]}
     assert srv._is_eligible_for_applicant(research_other, "RESEARCH_INSTITUTION") is True
     assert srv._is_eligible_for_applicant(generic_public, "RESEARCH_INSTITUTION") is False
+
+
+def test_capital_energy_upgrade_does_not_match_unrelated_rd_pilot():
+    grant = {
+        "title": "Accelerating Scale-up and Pre-piloting of Emerging Chemical Technologies",
+        "summary": "Supports research and development, scale-up, pre-piloting, and technology demonstration for emerging chemical technologies in industrial manufacturing.",
+        "tags": ["energy", "manufacturing", "technology", "chemical", "scale-up", "pilot"],
+        "sector": "energy / manufacturing efficiency",
+    }
+    payload = {
+        "projectTitle": "Rural Manufacturing Energy Upgrade",
+        "keywords": "small business, rural energy, energy efficiency, manufacturing",
+        "need": "Reduce energy use by upgrading efficient production equipment.",
+        "notes": "Capital equipment efficiency and operational improvements.",
+    }
+    ok, note = srv._relevance_compatible(grant, payload, "SMALL_BUSINESS")
+    assert ok is False
+    assert "R&D/pilot" in note
+
+def test_true_rd_project_can_pass_rd_domain_gate_when_specific_terms_overlap():
+    grant = {
+        "title": "Industrial Chemical Technology Demonstration",
+        "summary": "Research and development and prototype demonstration of chemical process technology.",
+        "tags": ["chemical", "prototype", "demonstration", "process"],
+        "sector": "entrepreneurship / innovation",
+    }
+    payload = {
+        "projectTitle": "Chemical Process Prototype Demonstration",
+        "keywords": "chemical process, prototype, demonstration, research",
+        "need": "Pilot a new chemical process prototype for commercialization.",
+        "notes": "R&D pilot and technology demonstration.",
+    }
+    ok, _ = srv._relevance_compatible(grant, payload, "SMALL_BUSINESS")
+    assert ok is True
