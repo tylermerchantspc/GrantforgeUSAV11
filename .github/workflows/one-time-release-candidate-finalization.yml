@@ -19,6 +19,8 @@ jobs:
           p = Path('scripts/release_candidate_patch.py')
           s = p.read_text()
           s = s.replace('p_end = server.index("\\n\\ndef ", p_start + 20)', 'p_end = server.index("\\n\\n@app.before_request", p_start + 20)')
+          s = s.replace("narrative_fn = '''", "narrative_fn = r'''", 1)
+          s = s.replace("pdf_fn = '''", "pdf_fn = r'''", 1)
           p.write_text(s)
           PY
           python scripts/release_candidate_patch.py
