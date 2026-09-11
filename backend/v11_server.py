@@ -794,7 +794,16 @@ def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant
         "research", "r&d", "prototype", "pilot", "scale-up", "scale up",
         "chemical technolog", "demonstration", "proof of concept", "commercialization",
     )
-    if any(term in grant_blob for term in rd_signals) and not any(term in client_blob for term in client_rd_signals):
+    client_explicit_non_rd = any(
+        term in client_blob
+        for term in (
+            "not an r&d", "not r&d", "not a research project", "not a pilot",
+            "not a prototype", "capital equipment efficiency", "operational improvements",
+            "equipment upgrade", "equipment replacement",
+        )
+    )
+    client_has_rd_intent = any(term in client_blob for term in client_rd_signals) and not client_explicit_non_rd
+    if any(term in grant_blob for term in rd_signals) and not client_has_rd_intent:
         return False, "Opportunity requires an R&D/pilot project not identified in the submitted project."
 
     # Education and small-business searches are especially vulnerable to broad R&D terms.

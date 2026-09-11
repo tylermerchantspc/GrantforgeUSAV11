@@ -541,3 +541,21 @@ def test_shortlist_filters_informational_noi_before_scoring(monkeypatch):
     }
     rows, _ = srv.shortlist(payload, pinned_grant=noi)
     assert rows == []
+
+
+def test_explicit_not_rd_language_does_not_create_rd_intent():
+    grant = {
+        "title": "Emerging Chemical Technology Pre-pilot",
+        "summary": "Research and development, prototype demonstration, and pre-piloting of emerging chemical technologies.",
+        "tags": ["chemical", "manufacturing", "energy", "prototype"],
+        "sector": "energy / manufacturing efficiency",
+    }
+    payload = {
+        "projectTitle": "Plant Energy Equipment Upgrade",
+        "keywords": "energy efficiency, manufacturing, equipment",
+        "need": "Replace inefficient equipment to reduce energy use.",
+        "notes": "This is not an R&D, prototype, or pilot project; it is an operational equipment upgrade.",
+    }
+    ok, note = srv._relevance_compatible(grant, payload, "SMALL_BUSINESS")
+    assert ok is False
+    assert "R&D/pilot" in note
