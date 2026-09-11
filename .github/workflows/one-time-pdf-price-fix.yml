@@ -25,7 +25,7 @@ jobs:
           path = Path('backend/v11_server.py')
           text = path.read_text(encoding='utf-8')
           old = 'f"Service fee: ${FLAT_PRICE:,.2f}",'
-          new = 'f"Service fee: ${_safe_float(payload.get(\"price\"), 0):,.2f}",'
+          new = '''f"Service fee: ${_safe_float(payload.get('price'), 0):,.2f}",'''
           if old not in text:
               raise SystemExit('Expected obsolete PDF price reference was not found')
           text = text.replace(old, new, 1)
