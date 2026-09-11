@@ -569,3 +569,11 @@
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+.field-guidance {
+  display: block;
+  margin-top: 0.45rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #526277;
+}

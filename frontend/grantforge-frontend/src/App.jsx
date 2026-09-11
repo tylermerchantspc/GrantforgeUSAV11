@@ -500,8 +500,8 @@ function LandingPage() {
       document.getElementById("matches")?.scrollIntoView({ behavior: "smooth", block: "start" });
       const firstPurchaseReady = matches.find((grant) => grant.purchasable);
       if (firstPurchaseReady) await loadPreview(firstPurchaseReady, payload);
-    } else {
-      setNotice("No matching federal opportunities were returned for this intake. Try refining the project keywords or funding request.");
+    } else if (!response.notice) {
+      setNotice("No purchase-ready federal opportunity matched this intake. Try refining the project description, keywords, applicant type, state, or funding request.");
     }
   }
 
@@ -659,6 +659,9 @@ function LandingPage() {
                     <option>City / Municipality</option>
                     <option>Other</option>
                   </select>
+                  {form.category === "Teacher (Classroom)" && (
+                    <small className="field-guidance">Many federal opportunities require the school or district - not an individual teacher - to be the eligible applicant. Enter the school or district information where applicable.</small>
+                  )}
                 </label>
                 <label>
                   Contact name <em>*</em>
