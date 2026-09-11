@@ -1,0 +1,28 @@
+name: One-time higher-ed eligibility precision
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-higher-ed-precision.yml'
+permissions:
+  contents: write
+jobs:
+  precision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply precision patch
+        run: python scripts/one_time_higher_ed_precision.py
+      - name: Validate backend syntax
+        run: python -m py_compile backend/v11_server.py backend/grantsgov_live.py backend/tests/test_v11_server.py
+      - name: Commit application changes
+        run: |
+          git config user.name "GrantForgeUSA automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add frontend/grantforge-frontend/src/App.jsx frontend/grantforge-frontend/tests/integration.test.mjs backend/v11_server.py backend/grantsgov_live.py backend/tests/test_v11_server.py
+          git commit -m "Separate higher-ed applicant classes and strengthen eligibility confirmation"
+          git push origin HEAD:main
