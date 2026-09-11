@@ -19,7 +19,7 @@ if ROOT_DIR and ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from runtime_config import load_runtime_settings
-from backend.grantsgov_live import search_live_grants
+from backend.grantsgov_live import fetch_live_grant, search_live_grants
 
 # PDF / data helpers
 from reportlab.lib.pagesizes import letter
@@ -637,6 +637,45 @@ def _funding_range_compatible(gr: Dict[str, Any], amount: float) -> Tuple[bool, 
         return False, f"Requested amount (${amount:,.0f}) exceeds this opportunity's maximum (${maximum:,.0f})."
     return True, ""
 
+def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant_type: str) -> Tuple[bool, str]:
+    """Reject broad-keyword cross-domain matches before they reach a customer."""
+    grant_blob = " ".join([
+        str(gr.get("title") or ""), str(gr.get("summary") or ""),
+        " ".join(str(t) for t in gr.get("tags", [])), str(gr.get("sector") or ""),
+    ]).lower()
+    client_blob = " ".join([
+        str(payload.get("projectTitle") or ""), str(payload.get("keywords") or ""),
+        str(payload.get("need") or ""), str(payload.get("notes") or ""),
+    ]).lower()
+
+    broad = {
+        "project", "program", "support", "services", "community", "federal", "grant",
+        "funding", "technology", "equipment", "training", "workforce", "energy",
+        "business", "small", "rural", "development", "improve", "improvement",
+    }
+    client_terms = {
+        w for w in re.findall(r"[a-z0-9]+", client_blob)
+        if len(w) >= 5 and w not in broad
+    }
+    grant_terms = set(re.findall(r"[a-z0-9]+", grant_blob))
+    distinctive_overlap = client_terms & grant_terms
+
+    # Strong domain conflicts must be explicitly present in the customer's project.
+    conflict_terms = {"nuclear", "radioactive", "petroleum", "pipeline"}
+    if (conflict_terms & grant_terms) and not (conflict_terms & set(re.findall(r"[a-z0-9]+", client_blob))):
+        return False, "Opportunity subject matter conflicts with the submitted project."
+    if ("oil" in grant_terms or ("natural" in grant_terms and "gas" in grant_terms)) and not any(x in client_blob for x in ("oil", "natural gas", "petroleum")):
+        return False, "Opportunity is focused on oil/gas rather than the submitted project."
+    if "tribal" in grant_terms and "tribal" not in client_blob:
+        return False, "Opportunity is focused on Tribal programs not identified in the intake."
+
+    # Education and small-business searches are especially vulnerable to broad R&D terms.
+    required = 2 if applicant_type in ("EDU", "SMALL_BUSINESS") else 1
+    if len(distinctive_overlap) < required:
+        return False, "Insufficient project-specific overlap after removing broad search terms."
+    return True, ""
+
+
 def _purchaseable_fit(gr: Dict[str, Any]) -> bool:
     return gr.get("fit") in ("Strong Match", "Possible Match") and bool(gr.get("purchasable"))
 
@@ -933,7 +972,7 @@ def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
     )
 
 
-def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
+def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = None) -> Tuple[List[Dict[str, Any]], bool]:
     """
     Turn intake into 0–3 ranked federal opportunities.
     Production queries the live Grants.gov API first and uses the local dataset only as a resilient fallback.
@@ -947,7 +986,9 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
     state_value = payload.get("state") or payload.get("eligible_state") or ""
 
     live_grants_enabled = os.getenv("LIVE_GRANTS_ENABLED", "true").lower() != "false"
-    if live_grants_enabled:
+    if pinned_grant:
+        grants = [pinned_grant]
+    elif live_grants_enabled:
         live_query = " ".join(filter(None, [payload.get("projectTitle", ""), payload.get("keywords", "")])).strip()
         grants = search_live_grants(live_query, applicant_type=applicant_type, sector=requested_sector) if live_query else []
         if not grants:
@@ -972,7 +1013,8 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
 
             geography_ok, geography_note = _geography_compatible(gr, state_value)
             funding_ok, funding_note = _funding_range_compatible(gr, amount)
-            if not geography_ok or not funding_ok:
+            relevance_ok, relevance_note = _relevance_compatible(gr, payload, applicant_type)
+            if not geography_ok or not funding_ok or not relevance_ok:
                 continue
 
             s = score_grant(gr, category, kws, amount)
@@ -999,7 +1041,7 @@ def shortlist(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
                     "score": s["score"],
                     "fit_notes": s["fit_notes"],
                     "purchasable": purchasable,
-                    "screening_notes": " ".join(n for n in (geography_note, funding_note) if n),
+                    "screening_notes": " ".join(n for n in (geography_note, funding_note, relevance_note) if n),
                     "min_amount": _safe_float(gr.get("min_amount"), 0),
                     "requires_match_percent": gr.get("requires_match_percent", 0),
                     "max_amount": _safe_float(gr.get("max_amount"), 0),
@@ -1271,7 +1313,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
     left_margin = 54
     top_y = 770
     body_top_y = 720
-    bottom_margin = 60
+    bottom_margin = 96
     line_width_chars = 98
 
     created_at = _now_utc()
@@ -1288,7 +1330,7 @@ def make_pdf(order_id: str, payload: Dict[str, Any]) -> str:
         c.setFont("Helvetica-Oblique", 9)
         c.drawString(
             left_margin,
-            bottom_margin - 12,
+            48,
             "Review and edit all draft materials before submission. All sales final. No refunds.",
         )
 
@@ -1491,7 +1533,11 @@ def preview():
         return jsonify(ok=False, error=missing_err), 400
 
     requested_grant = data.get("grant") or {}
-    short, _ = shortlist(data)
+    pinned = {}
+    requested_id = _first_identifier(requested_grant, "opp_id", "opportunity_id")
+    if requested_id and "Grants.gov" in str(requested_grant.get("source") or ""):
+        pinned = fetch_live_grant(requested_id)
+    short, _ = shortlist(data, pinned_grant=pinned or None)
     if not short:
         return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422
     grant = short[0]
@@ -1535,7 +1581,11 @@ def create_checkout_session():
     if not chk["ok"]:
         return jsonify(ok=False, error=chk["msg"]), 400
 
-    short, _ = shortlist(data)
+    pinned = {}
+    requested_id = _first_identifier(requested_grant, "opp_id", "opportunity_id")
+    if requested_id and "Grants.gov" in str(requested_grant.get("source") or ""):
+        pinned = fetch_live_grant(requested_id)
+    short, _ = shortlist(data, pinned_grant=pinned or None)
     if not short:
         return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422
     requested_key = _grant_key(requested_grant)

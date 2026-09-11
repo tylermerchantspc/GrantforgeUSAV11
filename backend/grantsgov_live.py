@@ -355,3 +355,14 @@ def search_live_grants(
                 grants.append(_detail_to_grant(hit, detail))
 
     return grants
+
+
+def fetch_live_grant(opportunity_id: str) -> Dict[str, Any]:
+    """Fetch and normalize one Grants.gov opportunity by its stable numeric id."""
+    opp_id = str(opportunity_id or "").strip()
+    if not opp_id.isdigit():
+        return {}
+    detail = _post_json(DETAIL_URL, {"opportunityId": int(opp_id)})
+    if not detail or not (detail.get("data") or {}).get("id"):
+        return {}
+    return _detail_to_grant({"id": opp_id}, detail)
