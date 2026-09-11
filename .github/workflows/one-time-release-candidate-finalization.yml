@@ -14,6 +14,13 @@ jobs:
           fetch-depth: 0
       - name: Apply release-candidate patch
         run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/release_candidate_patch.py')
+          s = p.read_text()
+          s = s.replace('p_end = server.index("\\n\\ndef ", p_start + 20)', 'p_end = server.index("\\n\\n@app.before_request", p_start + 20)')
+          p.write_text(s)
+          PY
           python scripts/release_candidate_patch.py
           python -m py_compile backend/v11_server.py backend/grantsgov_live.py
       - name: Commit application changes
