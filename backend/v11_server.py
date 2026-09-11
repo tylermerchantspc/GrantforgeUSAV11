@@ -469,20 +469,100 @@ def _session_belongs_requester(session_obj: Dict[str, Any]) -> bool:
     return expected_ip == _client_ip()
 
 
+def _deadline_dates(deadline_str: str) -> List[date]:
+    """Extract plausible application dates from ISO or prose deadline fields."""
+    raw = str(deadline_str or "").strip()
+    if not raw:
+        return []
+    found: List[date] = []
+
+    # ISO dates anywhere in the field.
+    for year, month, day in re.findall(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", raw):
+        try:
+            found.append(date(int(year), int(month), int(day)))
+        except ValueError:
+            pass
+
+    # Numeric US dates such as 04/01/2019.
+    for month, day, year in re.findall(r"\b(\d{1,2})/(\d{1,2})/(20\d{2})\b", raw):
+        try:
+            found.append(date(int(year), int(month), int(day)))
+        except ValueError:
+            pass
+
+    # Month-name dates such as April 1, 2019.
+    months = {
+        "january": 1, "february": 2, "march": 3, "april": 4,
+        "may": 5, "june": 6, "july": 7, "august": 8,
+        "september": 9, "october": 10, "november": 11, "december": 12,
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10,
+        "nov": 11, "dec": 12,
+    }
+    for month_name, day, year in re.findall(
+        r"\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+(\d{1,2}),?\s+(20\d{2})\b",
+        raw,
+        flags=re.I,
+    ):
+        try:
+            found.append(date(int(year), months[month_name.lower()], int(day)))
+        except ValueError:
+            pass
+
+    return sorted(set(found))
+
+
 def _deadline_ok(deadline_str: str) -> bool:
-    try:
-        d = date.fromisoformat(deadline_str)
-        return d >= date.today()
-    except Exception:
-        return True  # if missing, don’t block
+    raw = str(deadline_str or "").strip()
+    if not raw:
+        return True
+    dates = _deadline_dates(raw)
+    if dates:
+        return max(dates) >= date.today()
+    # Explicit rolling/year-round language is not treated as expired when no fixed date exists.
+    lowered = raw.lower()
+    if any(term in lowered for term in ("year-round", "year round", "rolling", "continuous")):
+        return True
+    # Unknown prose deadlines are allowed through this layer but remain subject to official-notice review.
+    return True
 
 
 def _is_expired(deadline_str: str) -> bool:
-    try:
-        d = date.fromisoformat(deadline_str)
-        return d < date.today()
-    except Exception:
+    raw = str(deadline_str or "").strip()
+    if not raw:
         return False
+    dates = _deadline_dates(raw)
+    if dates:
+        return max(dates) < date.today()
+    return False
+
+
+def _is_actionable_opportunity(gr: Dict[str, Any]) -> Tuple[bool, str]:
+    """Reject informational/forecast notices that are not currently accepting applications."""
+    title = str(gr.get("title") or "")
+    summary = str(gr.get("summary") or "")
+    blob = f"{title} {summary}".lower()
+
+    non_actionable_phrases = (
+        "notice of intent to issue",
+        "notice of intent (noi)",
+        "this notice of intent",
+        "informational purposes only",
+        "not requesting applications at this time",
+        "not requesting comments or applications",
+        "may issue a notice of funding opportunity",
+        "forecasted opportunity",
+        "forecast only",
+        "pre-solicitation notice",
+        "presolicitation notice",
+    )
+    if any(phrase in blob for phrase in non_actionable_phrases):
+        return False, "This record is informational or forecast-only and is not a current application opportunity."
+
+    # Titles beginning with NOI are treated conservatively when the body also describes a future NOFO.
+    if re.search(r"\bNOI\b", title, flags=re.I) and any(term in blob for term in ("may issue", "intends to issue", "will issue")):
+        return False, "This is a notice of intent rather than an open application opportunity."
+    return True, ""
 
 
 def _first_identifier(gr: Dict[str, Any], *keys: str) -> str:
@@ -1116,7 +1196,12 @@ def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = Non
             if _student_applicant_opportunity(gr):
                 continue
 
-            # hide expired unless explicitly requested
+            actionable, _ = _is_actionable_opportunity(gr)
+            if not actionable:
+                continue
+
+            # Hide expired opportunities, including prose deadline fields whose latest
+            # application date is already in the past.
             close_date = gr.get("close_date") or gr.get("deadline") or ""
             is_expired = _is_expired(close_date)
             if not include_expired and is_expired:

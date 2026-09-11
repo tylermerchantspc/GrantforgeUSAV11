@@ -499,3 +499,45 @@ def test_true_rd_project_can_pass_rd_domain_gate_when_specific_terms_overlap():
     }
     ok, _ = srv._relevance_compatible(grant, payload, "SMALL_BUSINESS")
     assert ok is True
+
+
+
+def test_notice_of_intent_is_not_actionable_even_when_terms_match():
+    grant = {
+        "title": "DE-FOA-0003646 Notice of Intent to Issue DE-FOA-0003647 Accelerating Scale-up and Pre-piloting of Emerging Chemical Technologies (ASPECT)",
+        "summary": "This Notice of Intent is for informational purposes only. DOE is not requesting comments or applications at this time and may issue a Notice of Funding Opportunity.",
+    }
+    ok, note = srv._is_actionable_opportunity(grant)
+    assert ok is False
+    assert "not a current application opportunity" in note
+
+
+def test_old_prose_deadline_is_recognized_as_expired():
+    deadline = "Applications are accepted year-round. Complete applications must be received no later than October 31, 2018, or April 1, 2019."
+    assert srv._deadline_dates(deadline)[-1].isoformat() == "2019-04-01"
+    assert srv._is_expired(deadline) is True
+    assert srv._deadline_ok(deadline) is False
+
+
+def test_future_prose_deadline_is_not_expired():
+    deadline = "Applications must be received by December 31, 2026."
+    assert srv._is_expired(deadline) is False
+    assert srv._deadline_ok(deadline) is True
+
+
+def test_shortlist_filters_informational_noi_before_scoring(monkeypatch):
+    payload = _payload("Example Small Business", "energy, manufacturing, efficiency", "Small Business")
+    payload["state"] = "Minnesota"
+    payload["amountRequested"] = 90000
+    noi = {
+        "title": "Notice of Intent to Issue Future Energy NOFO",
+        "summary": "This Notice of Intent is for informational purposes only; applications are not being requested at this time.",
+        "eligibility_codes": ["23"],
+        "deadline": "2026-12-31",
+        "min_amount": 1000,
+        "max_amount": 500000,
+        "tags": ["energy", "manufacturing", "efficiency"],
+        "sector": "energy / manufacturing efficiency",
+    }
+    rows, _ = srv.shortlist(payload, pinned_grant=noi)
+    assert rows == []
