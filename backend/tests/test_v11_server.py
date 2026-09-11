@@ -450,3 +450,18 @@ def test_agriculture_sector_precedes_generic_stem_or_workforce_terms():
 
 def test_flat_price_remains_4999_after_sector_routing_changes():
     assert srv.price_for("College / University / Research Institution", 50000000) == pytest.approx(49.99)
+
+
+def test_public_and_private_higher_ed_codes_are_not_interchangeable():
+    public = {"eligibility_codes": ["06"]}
+    private = {"eligibility_codes": ["20"]}
+    assert srv._is_eligible_for_applicant(public, "HIGHER_ED_PUBLIC") is True
+    assert srv._is_eligible_for_applicant(public, "HIGHER_ED_PRIVATE") is False
+    assert srv._is_eligible_for_applicant(private, "HIGHER_ED_PRIVATE") is True
+    assert srv._is_eligible_for_applicant(private, "HIGHER_ED_PUBLIC") is False
+
+def test_research_institution_requires_unrestricted_or_other_text_confirmation():
+    research_other = {"eligibility_codes": ["25"], "eligibility_text": "Eligible applicants include other research institutions and organizations and university research foundations."}
+    generic_public = {"eligibility_codes": ["06"]}
+    assert srv._is_eligible_for_applicant(research_other, "RESEARCH_INSTITUTION") is True
+    assert srv._is_eligible_for_applicant(generic_public, "RESEARCH_INSTITUTION") is False

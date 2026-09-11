@@ -647,7 +647,9 @@ function LandingPage() {
                   <select name="category" value={form.category} onChange={updateField} required>
                     <option value="">Select type</option>
                     <option>K-12 School / District / Educator</option>
-                    <option>College / University / Research Institution</option>
+                    <option>Public College / University</option>
+                    <option>Private College / University</option>
+                    <option>Research Institution / University Research Foundation</option>
                     <option>Church / Faith Organization</option>
                     <option>501(c)(3) Nonprofit</option>
                     <option>Nonprofit / Community Organization</option>
@@ -663,8 +665,8 @@ function LandingPage() {
                   {form.category === "K-12 School / District / Educator" && (
                     <small className="field-guidance">Use the school or district that would be the legal applicant. A teacher or educator may be the contact when authorized by the applicant organization.</small>
                   )}
-                  {form.category === "College / University / Research Institution" && (
-                    <small className="field-guidance">Use the institution as the applicant and the professor, principal investigator, dean, or grant administrator as the contact.</small>
+                  {["Public College / University", "Private College / University", "Research Institution / University Research Foundation"].includes(form.category) && (
+                    <small className="field-guidance">Use the legal institution as the applicant and the professor, principal investigator, dean, or grant administrator as the contact. Choose the applicant type that matches the entity that will actually submit the application.</small>
                   )}
                 </label>
                 <label>
@@ -801,7 +803,7 @@ function LandingPage() {
                         <label className="check-label purchase-check">
                           <input type="checkbox" checked={saleTerms} onChange={(event) => { setSaleTerms(event.target.checked); setCheckoutError(""); }} />
                           <span>
-                            I have checked my information and selected grant. I agree to the <a href="/terms" target="_blank">Terms</a>, authorize GrantForgeUSA to begin the customized drafting service immediately after payment, and understand the $49.99 service is final and non-refundable once generation begins except where required by law or if GrantForgeUSA fails to deliver the purchased service. Funding is not guaranteed.
+                            I have checked my information and selected grant, opened the official opportunity notice, and confirm the applicant appears to meet its eligibility requirements. I agree to the <a href="/terms" target="_blank">Terms</a>, authorize GrantForgeUSA to begin the customized drafting service immediately after payment, and understand the $49.99 service is final and non-refundable once generation begins except where required by law or if GrantForgeUSA fails to deliver the purchased service. GrantForgeUSA screening is preliminary and funding is not guaranteed.
                           </span>
                         </label>
 

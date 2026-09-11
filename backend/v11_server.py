@@ -135,6 +135,9 @@ def _tokenize_text(s: str) -> List[str]:
 
 INTAKE_TYPE_MAP = {
     "k-12 school / district / educator": "EDU_K12",
+    "public college / university": "HIGHER_ED_PUBLIC",
+    "private college / university": "HIGHER_ED_PRIVATE",
+    "research institution / university research foundation": "RESEARCH_INSTITUTION",
     "college / university / research institution": "HIGHER_ED",
     "church / faith organization": "NONPROFIT",
     "501(c)(3) nonprofit": "NONPROFIT_501C3",
@@ -700,7 +703,7 @@ def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant
         return False, "Opportunity is focused on Tribal programs not identified in the intake."
 
     # Education and small-business searches are especially vulnerable to broad R&D terms.
-    required = 2 if applicant_type in ("EDU_K12", "HIGHER_ED", "SMALL_BUSINESS", "FOR_PROFIT") else 1
+    required = 2 if applicant_type in ("EDU_K12", "HIGHER_ED", "HIGHER_ED_PUBLIC", "HIGHER_ED_PRIVATE", "RESEARCH_INSTITUTION", "SMALL_BUSINESS", "FOR_PROFIT") else 1
     if len(distinctive_overlap) < required:
         return False, "Insufficient project-specific overlap after removing broad search terms."
     return True, ""
@@ -727,7 +730,7 @@ def score_grant(
 
     # 1) eligibility (already gated, but weighted highest)
     score += 100
-    fit_notes.append(f"Eligibility matched for {applicant_type}.")
+    fit_notes.append(f"Applicant category passed preliminary Grants.gov synopsis screening for {applicant_type}; all additional eligibility conditions still require verification in the official notice.")
 
     # 2) keyword overlap
     tags = normalized_tags(gr.get("tags", []))
@@ -964,6 +967,9 @@ def _eligibility_needles(applicant_type: str) -> Tuple[str, ...]:
     return {
         "EDU_K12": ("independent school district", "school district", "local education agency", "education agency", "k-12 school", "k12 school"),
         "HIGHER_ED": ("institution of higher education", "institutions of higher education", "college", "colleges", "university", "universities", "higher education"),
+        "HIGHER_ED_PUBLIC": ("public institution of higher education", "public institutions of higher education", "state controlled institution", "public college", "public university", "college", "colleges", "university", "universities"),
+        "HIGHER_ED_PRIVATE": ("private institution of higher education", "private institutions of higher education", "private college", "private university", "college", "colleges", "university", "universities"),
+        "RESEARCH_INSTITUTION": ("research institution", "research institutions", "research organization", "research organizations", "university research foundation", "research foundation", "research foundations"),
         "NONPROFIT_501C3": ("501(c)(3)", "501c3", "nonprofit", "non-profit"),
         "NONPROFIT": ("nonprofit", "non-profit", "community-based organization", "community organization", "faith-based organization"),
         "SMALL_BUSINESS": ("small business", "small businesses", "sbir", "sttr"),
@@ -1009,6 +1015,9 @@ def _is_eligible_for_applicant(gr: Dict[str, Any], applicant_type: str) -> bool:
     code_map = {
         "EDU_K12": {"05", "99"},
         "HIGHER_ED": {"06", "20", "99"},
+        "HIGHER_ED_PUBLIC": {"06", "99"},
+        "HIGHER_ED_PRIVATE": {"20", "99"},
+        "RESEARCH_INSTITUTION": {"99"},
         "NONPROFIT_501C3": {"12", "99"},
         "NONPROFIT": {"12", "13", "99"},
         "SMALL_BUSINESS": {"23", "99"},
@@ -1305,6 +1314,9 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     profile = {
         "EDU_K12": ("education applicant", "instructional or school-system delivery", "learners, educators, and the school community"),
         "HIGHER_ED": ("higher-education or research institution", "research, teaching, institutional, or sponsored-program delivery", "the identified research, education, or community beneficiaries"),
+        "HIGHER_ED_PUBLIC": ("public college or university", "research, teaching, institutional, extension, or sponsored-program delivery", "the identified research, education, or community beneficiaries"),
+        "HIGHER_ED_PRIVATE": ("private college or university", "research, teaching, institutional, or sponsored-program delivery", "the identified research, education, or community beneficiaries"),
+        "RESEARCH_INSTITUTION": ("research institution or university research foundation", "research or sponsored-program delivery", "the identified research or community beneficiaries"),
         "NONPROFIT_501C3": ("501(c)(3) nonprofit", "mission-driven program delivery", "the identified beneficiaries and community partners"),
         "NONPROFIT": ("nonprofit or community organization", "mission-driven program delivery", "the identified beneficiaries and community partners"),
         "SMALL_BUSINESS": ("small business", "business, innovation, operational, or commercialization activity", "the business, workforce, customers, and other stated beneficiaries"),

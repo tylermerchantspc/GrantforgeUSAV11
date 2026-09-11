@@ -77,7 +77,9 @@ test("technology is positioned as proprietary software without public AI brandin
 });
 
 test("public intake includes higher education and no student-aid surface", () => {
-  assert.ok(appSource.includes("College / University / Research Institution"));
+  assert.ok(appSource.includes("Public College / University"));
+  assert.ok(appSource.includes("Private College / University"));
+  assert.ok(appSource.includes("Research Institution / University Research Foundation"));
   assert.ok(appSource.includes("principal investigator"));
   assert.equal(/\bFAFSA\b/i.test(appSource), false);
   assert.equal(/student aid/i.test(appSource), false);
@@ -136,4 +138,9 @@ test("Vercel response headers apply a restrictive browser policy", () => {
   ]) {
     assert.ok(headerNames.has(required), `missing ${required}`);
   }
+});
+
+test("checkout requires official eligibility review before customized drafting", () => {
+  assert.ok(appSource.includes("opened the official opportunity notice"));
+  assert.ok(appSource.includes("screening is preliminary"));
 });

@@ -30,6 +30,9 @@ APPLICANT_ELIGIBILITY_CODES = {
     # positively confirm the applicant in that free-text field before sale.
     "EDU_K12": ["05", "25", "99"],
     "HIGHER_ED": ["06", "20", "25", "99"],
+    "HIGHER_ED_PUBLIC": ["06", "25", "99"],
+    "HIGHER_ED_PRIVATE": ["20", "25", "99"],
+    "RESEARCH_INSTITUTION": ["25", "99"],
     "NONPROFIT_501C3": ["12", "25", "99"],
     "NONPROFIT": ["12", "13", "25", "99"],
     "SMALL_BUSINESS": ["23", "25", "99"],
