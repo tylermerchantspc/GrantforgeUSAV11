@@ -39,31 +39,42 @@ jobs:
           assert str(health.get('mode','')).lower() == 'test'
 
           positive = {
-              'organization':'Prairie State University',
-              'category':'Public College / University',
-              'state':'Minnesota',
-              'annualBudget':50000000,
-              'projectTitle':'Rural Agricultural STEM Career Pathways',
-              'amountRequested':150000,
-              'timeline':'12 months',
-              'audience':'Rural K-14 students in southern Minnesota interested in agricultural science and engineering careers',
+              'organization':'Prairie State University', 'category':'Public College / University', 'state':'Minnesota',
+              'annualBudget':50000000, 'projectTitle':'Rural Agricultural STEM Career Pathways', 'amountRequested':150000,
+              'timeline':'12 months', 'audience':'Rural K-14 students in southern Minnesota interested in agricultural science and engineering careers',
               'keywords':'STEM, agriculture, rural youth, agricultural science, engineering, careers, experiential learning',
               'need':'Rural K-14 students have limited access to hands-on agricultural science, engineering, mentoring, and career pathway experiences.',
               'notes':'The applicant is a public, state-controlled, accredited university. It plans a single-function education and extension project in food and agricultural sciences led by faculty and extension educators with secondary and community-college partners.'
           }
+          energy = {
+              'organization':'North Star Fabrication LLC', 'category':'Small Business', 'state':'Minnesota', 'annualBudget':380000,
+              'projectTitle':'Rural Manufacturing Energy Upgrade', 'amountRequested':90000, 'timeline':'12 months',
+              'audience':'Manufacturing employees and customers', 'keywords':'small business, rural energy, energy efficiency, manufacturing',
+              'need':'Reduce energy use in a rural manufacturing operation by replacing inefficient production equipment.',
+              'notes':'Capital equipment efficiency and operational improvements.'
+          }
 
-          results = []
-          for attempt in range(10):
-              st, out = post('/questionnaire', positive)
-              assert st == 200 and out.get('ok') is True, (st, out)
-              results = out.get('results') or []
-              print('POSITIVE ATTEMPT', attempt + 1, [(r.get('opp_id'), r.get('title'), r.get('fit')) for r in results])
-              blob = json.dumps(results).lower()
-              if results and 'air force fiscal year 2027 young investigator' not in blob and all('agricultur' in ((r.get('sector') or '') + ' ' + (r.get('summary') or '')).lower() for r in results):
+          # Render deploys asynchronously. Use the two known stale/bad records as a deployment sentinel.
+          energy_out = {}
+          for attempt in range(12):
+              st, energy_out = post('/questionnaire', energy)
+              assert st == 200 and energy_out.get('ok') is True, (st, energy_out)
+              ids = {str(r.get('opp_id')) for r in (energy_out.get('results') or [])}
+              print('DEPLOY SENTINEL', attempt + 1, [(r.get('opp_id'), r.get('title')) for r in (energy_out.get('results') or [])])
+              if '310029' not in ids and '363174' not in ids:
                   break
               time.sleep(15)
+          ids = {str(r.get('opp_id')) for r in (energy_out.get('results') or [])}
+          assert '310029' not in ids, 'Expired 2019 REAP record still surfaced'
+          assert '363174' not in ids, 'DOE Notice of Intent still surfaced'
+          assert 'accelerating scale-up and pre-piloting of emerging chemical technologies' not in json.dumps(energy_out).lower()
 
-          assert results, 'Expected at least one defensible live agriculture/higher-ed opportunity'
+          # Positive live Grants.gov path.
+          st, out = post('/questionnaire', positive)
+          assert st == 200 and out.get('ok') is True, (st, out)
+          results = out.get('results') or []
+          print('POSITIVE', [(r.get('opp_id'), r.get('title'), r.get('fit')) for r in results])
+          assert results
           blob = json.dumps(results).lower()
           assert 'air force fiscal year 2027 young investigator' not in blob
           assert 'air force basic research sciences conference' not in blob
@@ -76,7 +87,7 @@ jobs:
 
           selected = dict(positive); selected['grant'] = target
           st, preview = post('/preview', selected)
-          print('PREVIEW', st, preview)
+          print('PREVIEW STATUS', st)
           assert st == 200 and preview.get('ok') is True, (st, preview)
           lower = (preview.get('summary') or '').lower()
           assert 'prairie state university' in lower
@@ -85,30 +96,26 @@ jobs:
           for invented in ('20% engagement','70% proficiency','90% milestone'):
               assert invented not in lower
 
+          # Stripe test session only; no charge is completed.
           st, checkout = post('/create-checkout-session', selected)
-          print('CHECKOUT', st, {k:v for k,v in checkout.items() if k != 'url'})
+          print('CHECKOUT STATUS', st)
           assert st == 200 and checkout.get('ok') is True, (st, checkout)
           assert str(checkout.get('url','')).startswith('https://checkout.stripe.com/')
           assert checkout.get('checkoutReference')
 
+          # Known historical false-positive cases must remain clean.
           negatives = [
               ('MEMORIAL', {'organization':'Martin County Veterans','category':'501(c)(3) Nonprofit','state':'Minnesota','annualBudget':90000,'projectTitle':'Purple Heart Statue','amountRequested':50000,'timeline':'May 2027','audience':'Local veterans and travelers to Martin County','keywords':'memorial, veterans, park','need':'Install a memorial at the county veterans park recognizing the cost of war.','notes':'Local veterans organizations may assist.'}),
               ('ROBOTICS', {'organization':'Prairie Ridge Middle School','category':'K-12 School / District / Educator','state':'Minnesota','annualBudget':120000,'projectTitle':'Rural Robotics Discovery Lab','amountRequested':18000,'timeline':'2026-2027 school year','audience':'Middle school students','keywords':'STEM, robotics, classroom technology, equipment','need':'Expand hands-on robotics and engineering learning.','notes':'School-based instructional project.'}),
-              ('ENERGY', {'organization':'North Star Fabrication LLC','category':'Small Business','state':'Minnesota','annualBudget':380000,'projectTitle':'Rural Manufacturing Energy Upgrade','amountRequested':90000,'timeline':'12 months','audience':'Manufacturing employees and customers','keywords':'small business, rural energy, energy efficiency, manufacturing','need':'Reduce energy use in a rural manufacturing operation.','notes':'Capital equipment efficiency and operational improvements; this is not an R&D, chemical-technology, prototype, or pilot project.'}),
           ]
-          forbidden = (
-              'advancing oil and natural gas production',
-              'advanced nuclear energy licensing',
-              'radioactive materials transportation',
-              'accelerating scale-up and pre-piloting of emerging chemical technologies',
-          )
+          forbidden = ('advancing oil and natural gas production','advanced nuclear energy licensing','radioactive materials transportation')
           for label, payload in negatives:
-              st, out = post('/questionnaire', payload)
-              assert st == 200 and out.get('ok') is True, (label, st, out)
-              text = json.dumps(out).lower()
-              print(label, [(r.get('title'), r.get('fit')) for r in (out.get('results') or [])])
+              st, result = post('/questionnaire', payload)
+              assert st == 200 and result.get('ok') is True, (label, st, result)
+              text = json.dumps(result).lower()
+              print(label, [(r.get('title'), r.get('fit')) for r in (result.get('results') or [])])
               for phrase in forbidden:
-                  assert phrase not in text, (label, phrase, out)
+                  assert phrase not in text, (label, phrase, result)
 
-          print('FINAL_DEPLOYED_ACCEPTANCE_PASS_V3')
+          print('FINAL_DEPLOYED_ACCEPTANCE_PASS')
           PY
