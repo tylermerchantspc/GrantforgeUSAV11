@@ -1,0 +1,98 @@
+name: QA 15 client live sweep
+on:
+  push:
+    paths:
+      - '.github/workflows/qa-15-client-live.yml'
+permissions:
+  contents: read
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Run 15 deployed client journeys
+        env:
+          BASE_URL: https://grantforgeusa-v11-backend.onrender.com
+        run: |
+          python - <<'PY'
+          import concurrent.futures
+          import json
+          import os
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+
+          base = os.environ['BASE_URL'].rstrip('/')
+
+          def client(label, org, category, state, budget, project, amount, timeline, audience, keywords, need, notes, zip_code='56031'):
+              return label, {'organization':org,'contactName':'GrantForge QA','contactEmail':label.lower()+'@example.com','zip':zip_code,'category':category,'state':state,'annualBudget':budget,'projectTitle':project,'amountRequested':amount,'timeline':timeline,'audience':audience,'keywords':keywords,'need':need,'notes':notes}
+
+          clients = [
+            client('C01_PUBLIC_UNI_AG_STEM','Prairie State University','Public College / University','MN',50000000,'Rural Agricultural STEM Career Pathways',150000,'12 months','Rural K-14 students in southern Minnesota','STEM, agriculture, rural youth, agricultural science, engineering, careers','Expand hands-on agricultural science, engineering, mentoring, and career pathways for rural students.','Public state-controlled accredited university; faculty-led education and extension project.'),
+            client('C02_K12_ROBOTICS','Prairie Ridge Middle School','K-12 School / District / Educator','MN',120000,'Rural Robotics Discovery Lab',18000,'2026-2027 school year','Middle school students','STEM, robotics, classroom technology, equipment','Expand hands-on robotics and engineering learning.','Public school district instructional project.'),
+            client('C03_VETERANS_MEMORIAL','Martin County Veterans Memorial Fund','501(c)(3) Nonprofit','MN',90000,'Purple Heart Memorial Statue',50000,'May 2027','Local veterans families and visitors','memorial, veterans, park, public history','Install a permanent memorial at a county veterans park recognizing military service and sacrifice.','Local veterans organizations may assist.'),
+            client('C04_SMALL_BIZ_ENERGY','North Star Fabrication LLC','Small Business','MN',380000,'Rural Manufacturing Energy Upgrade',90000,'12 months','Manufacturing employees and customers','small business, rural energy, energy efficiency, manufacturing','Reduce energy use by replacing inefficient production equipment.','Capital equipment efficiency and operational improvements.'),
+            client('C05_LOCAL_GOV_WATER','City of Prairie Junction','City / County / Local Government','MN',6200000,'Drinking Water Main Replacement and Lead Service Reduction',850000,'24 months','Residents served by municipal water system','drinking water, lead service lines, water infrastructure, rural community, public health','Replace aging water mains and reduce lead service line exposure in a small rural community.','City-owned public water system serving fewer than 10000 residents.','56101'),
+            client('C06_TRIBAL_FOOD','Red River Tribal Community Council','Tribal Government / Organization','MN',8400000,'Tribal Food Sovereignty and Youth Agriculture Program',275000,'24 months','Tribal youth and families','tribal, food sovereignty, agriculture, youth, nutrition, community food systems','Increase local food production and culturally grounded agricultural education.','Federally recognized tribal government; gardens, training, and food distribution.','56601'),
+            client('C07_HOUSING_AUTHORITY','Prairie County Housing Authority','Public Housing Authority','MN',4100000,'Public Housing Energy and Accessibility Rehabilitation',600000,'18 months','Low-income seniors and families in public housing','public housing, energy efficiency, accessibility, rehabilitation, low income','Modernize aging public housing units to reduce energy costs and improve accessibility.','PHA-owned multifamily housing; insulation, HVAC, lighting, and accessibility upgrades.','56001'),
+            client('C08_NONPROFIT_FOOD','Southern Prairie Food Network','501(c)(3) Nonprofit','MN',720000,'Rural Food Access Mobile Market',125000,'18 months','Low-income rural families and seniors','food insecurity, rural, mobile market, nutrition, local food, underserved communities','Rural residents lack transportation and nearby access to affordable nutritious food.','Nonprofit partnering with local farms, food shelves, and senior housing sites.'),
+            client('C09_FAITH_SHELTER','Hope Community Church Outreach','Church / Faith Organization','AL',450000,'Winter Emergency Shelter and Meal Program',85000,'12 months','Adults and families experiencing homelessness','homelessness, emergency shelter, meals, outreach, housing stability','Provide temporary winter shelter, meals, and referral services.','Faith-based organization; secular social services open to all eligible participants.','35801'),
+            client('C10_RESEARCH_WILDFIRE','Great Plains Research Foundation','Research Institution / University Research Foundation','SD',18000000,'Wildfire Smoke Exposure and Rural Community Resilience',425000,'36 months','Rural communities exposed to wildfire smoke','wildfire, smoke, public health, rural communities, resilience, exposure research','Quantify wildfire smoke exposure and test practical community resilience interventions.','Independent nonprofit research foundation with university and public-health partners.','57701'),
+            client('C11_STATE_CYBER','Minnesota Office of Public Services','State Government / Agency','MN',95000000,'Rural Local Government Cybersecurity Modernization',1200000,'24 months','Small county and municipal governments','cybersecurity, state government, local government, rural, critical infrastructure, resilience','Improve cybersecurity capacity for small local governments without dedicated security staff.','State agency would administer assessments, training, shared services, and incident response.','55101'),
+            client('C12_PRIVATE_UNI_HEALTH','Midwest Health Sciences University','Private College / University','IA',140000000,'Rural Diabetes Prevention Implementation Study',650000,'36 months','Adults at high risk for type 2 diabetes in rural counties','diabetes prevention, rural health, implementation science, public health, health disparities','Evaluate evidence-based diabetes prevention strategies in underserved rural communities.','Accredited private nonprofit university with faculty investigators and clinical partners.','50309'),
+            client('C13_SMALL_BIZ_AGTECH','FieldSense AgTech LLC','Small Business','IA',650000,'Low-Cost Soil Nutrient Sensor for Small Farms',250000,'18 months','Small and midsize agricultural producers','SBIR, agriculture technology, soil sensor, precision agriculture, small farms, research and development','Develop and validate a lower-cost soil nutrient sensor for fertilizer decisions.','US-owned for-profit small business performing R&D and prototype development in the United States.','50010'),
+            client('C14_INDIVIDUAL_ARTIST','Independent Applicant','Individual / Independent Applicant','VA',50000,'Civil War Heritage Photography Book',30000,'12 months','General public and local history readers','photography, history, Civil War, book publication, heritage','Photograph and publish a book documenting regional Civil War heritage sites.','Individual applicant with no nonprofit or government fiscal sponsor.','24541'),
+            client('C15_NONPROFIT_DV','Safe Harbor Family Services','501(c)(3) Nonprofit','TN',1300000,'Rural Domestic Violence Legal Advocacy and Safety Services',300000,'24 months','Survivors of domestic violence in rural counties','domestic violence, victim services, legal advocacy, rural, safety planning, underserved','Expand trauma-informed legal advocacy, safety planning, and coordinated victim services.','Nonprofit victim-service provider with law-enforcement and legal-aid partnerships.','37201')]
+
+          def get(path):
+              with urlopen(base+path, timeout=45) as r: return r.status, json.loads(r.read().decode())
+          def post(path,payload,timeout=90):
+              req=Request(base+path,data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST')
+              try:
+                  with urlopen(req,timeout=timeout) as r: return r.status,json.loads(r.read().decode())
+              except HTTPError as exc:
+                  raw=exc.read().decode(errors='replace')
+                  try: data=json.loads(raw)
+                  except Exception: data={'raw':raw}
+                  return exc.code,data
+              except Exception as exc: return 0,{'error':repr(exc)}
+
+          status,health=get('/get/health')
+          print('HEALTH',status,json.dumps(health,sort_keys=True),flush=True)
+          assert status==200 and health.get('ok') is True and str(health.get('mode','')).lower()=='test'
+
+          def search_one(item):
+              label,payload=item; st,out=post('/questionnaire',payload); return label,payload,st,out
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+              searched=[f.result() for f in concurrent.futures.as_completed([pool.submit(search_one,x) for x in clients])]
+          searched.sort(key=lambda x:x[0])
+
+          report=[]; forbidden_ids={'310029','363174'}
+          forbidden_phrases=('advancing oil and natural gas production','advanced nuclear energy licensing','radioactive materials transportation','accelerating scale-up and pre-piloting of emerging chemical technologies')
+          for label,payload,st,out in searched:
+              results=(out.get('results') or []) if isinstance(out,dict) else []
+              text=json.dumps(out).lower() if isinstance(out,dict) else ''
+              ids={str(r.get('opp_id')) for r in results}
+              row={'label':label,'project':payload['projectTitle'],'search_status':st,'search_ok':bool(isinstance(out,dict) and out.get('ok') is True),'notice':out.get('notice','') if isinstance(out,dict) else '','result_count':len(results),'results':[],'expired_or_notice_regression':bool(ids & forbidden_ids),'forbidden_phrase_regression':any(p in text for p in forbidden_phrases),'preview_status':None,'preview_ok':None,'checkout_status':None,'checkout_ok':None,'checkout_test_url':None}
+              for r in results[:3]:
+                  row['results'].append({'opp_id':r.get('opp_id'),'title':r.get('title'),'fit':r.get('fit'),'purchasable':r.get('purchasable'),'source':r.get('source'),'min_amount':r.get('min_amount'),'max_amount':r.get('max_amount'),'deadline':r.get('close_date') or r.get('deadline'),'sector':r.get('sector'),'eligibility':r.get('eligibility')})
+              target=next((r for r in results if r.get('purchasable') is True),None)
+              if target:
+                  selected=dict(payload); selected['grant']=target
+                  pst,preview=post('/preview',selected); row['preview_status']=pst; row['preview_ok']=bool(isinstance(preview,dict) and preview.get('ok') is True); row['preview_excerpt']=(preview.get('summary') or '')[:1200] if isinstance(preview,dict) else ''
+                  cst,checkout=post('/create-checkout-session',selected); row['checkout_status']=cst; row['checkout_ok']=bool(isinstance(checkout,dict) and checkout.get('ok') is True); row['checkout_test_url']=str(checkout.get('url','')).startswith('https://checkout.stripe.com/') if isinstance(checkout,dict) else False; row['checkout_reference']=bool(checkout.get('checkoutReference')) if isinstance(checkout,dict) else False
+              report.append(row)
+              print('\nCLIENT',label,'-',payload['projectTitle']); print(json.dumps(row,indent=2),flush=True)
+
+          with open('qa-15-client-report.json','w') as f: json.dump({'health':health,'report':report},f,indent=2)
+          transport=[r['label'] for r in report if not r['search_ok'] or r['search_status']!=200]
+          regressions=[r['label'] for r in report if r['expired_or_notice_regression'] or r['forbidden_phrase_regression']]
+          flows=[r['label'] for r in report if r['preview_status'] is not None and (not r['preview_ok'] or not r['checkout_ok'] or not r['checkout_test_url'])]
+          print('\nQA_SUMMARY'); print('clients=',len(report)); print('search_transport_failures=',transport); print('known_regressions=',regressions); print('preview_checkout_failures=',flows); print('clients_with_results=',sum(1 for r in report if r['result_count']>0)); print('clients_with_purchase_ready=',sum(1 for r in report if r['preview_status'] is not None))
+          assert len(report)==15 and not transport and not regressions and not flows
+          PY
+      - name: Upload QA report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-15-client-report
+          path: qa-15-client-report.json
