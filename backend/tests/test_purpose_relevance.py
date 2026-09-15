@@ -152,3 +152,39 @@ def test_ag_career_pathway_accepts_education_workforce_program():
         "HIGHER_ED_PUBLIC",
     )
     assert ok is True
+
+
+def test_diabetes_incidental_summary_mention_does_not_override_wrong_title():
+    ok, _ = check(
+        grant("Anti-Obesity Medication Clinical Centers", "Obesity treatment research that may track diabetes and metabolic outcomes."),
+        payload("Rural Diabetes Prevention Study", "diabetes prevention, type 2 diabetes, implementation science"),
+        "HIGHER_ED_PRIVATE",
+    )
+    assert ok is False
+
+
+def test_opioid_incidental_summary_mention_does_not_override_wrong_title():
+    ok, _ = check(
+        grant("BRAIN Circuits Program", "Neuroscience research relevant to addiction and opioid-related brain pathways."),
+        payload("Opioid Overdose Prevention Network", "opioid, overdose prevention, naloxone, substance use disorder"),
+        "GOV_LOCAL",
+    )
+    assert ok is False
+
+
+def test_tribal_college_title_requires_tribal_college_applicant_context():
+    gr = grant("Tribal Colleges Extension Program Special Emphasis", "Agricultural extension and education for tribal colleges.")
+    p = payload("Rural Agricultural STEM Career Pathways", "agriculture, STEM, career pathways, education")
+    p['organization'] = 'Prairie State University'
+    p['category'] = 'Public College / University'
+    ok, _ = check(gr, p, "HIGHER_ED_PUBLIC")
+    assert ok is False
+
+
+def test_career_pathway_rejects_generic_ag_trade_even_if_summary_mentions_workforce():
+    ok, _ = check(
+        grant("Coordinating Agricultural Development and International Trade", "Agricultural market development with workforce capacity building overseas."),
+        payload("Rural Agricultural STEM Career Pathways", "agriculture, STEM, career pathways, education and workforce development"),
+        "HIGHER_ED_PUBLIC",
+    )
+    assert ok is False

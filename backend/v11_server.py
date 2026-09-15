@@ -877,6 +877,20 @@ _STRICT_PURPOSE_GROUPS = {
     "flood_mitigation", "apprenticeship", "food_sovereignty", "pollinator", "career_education",
 }
 
+_TITLE_REQUIRED_PURPOSES = {
+    "diabetes": ("diabetes", "glycemic"),
+    "opioid": ("opioid", "overdose", "substance use", "addiction"),
+    "mental_health": ("suicide", "mental health", "behavioral health", "psychiatr"),
+    "obesity": ("obesity", "anti-obesity", "weight management"),
+    "cancer": ("cancer", "glioblastoma", "oncology", "tumor"),
+    "neurology": ("brain", "neurolog", "neuroscience"),
+    "aging": ("aging", "geriatric", "alzheimer"),
+    "apprenticeship": ("apprentice", "apprenticeship"),
+    "food_sovereignty": ("food sovereignty",),
+    "pollinator": ("pollinator", "bee", "monarch"),
+    "career_education": ("education", "workforce", "career", "extension"),
+}
+
 
 def _purpose_groups(text: str) -> set[str]:
     padded = f" {str(text or '').lower()} "
@@ -951,6 +965,22 @@ def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant
     missing_strict_groups = strict_client_groups - grant_groups
     if missing_strict_groups:
         return False, "Opportunity misses required project-specific purpose: " + ", ".join(sorted(missing_strict_groups)) + "."
+
+    # Narrow clinical and program-specific projects require title-level evidence. This keeps an
+    # incidental mention in a broad synopsis from turning an unrelated program into a match.
+    for purpose in strict_client_groups:
+        title_terms = _TITLE_REQUIRED_PURPOSES.get(purpose)
+        if title_terms and not any(term in grant_title for term in title_terms):
+            return False, f"Opportunity title does not identify the required {purpose} purpose."
+
+    # Named tribal-college programs are institution-specific; generic higher-ed eligibility is not enough.
+    if "tribal college" in grant_title:
+        applicant_blob = " ".join([
+            str(payload.get("organization") or ""), str(payload.get("notes") or ""),
+            str(payload.get("category") or ""),
+        ]).lower()
+        if "tribal college" not in applicant_blob and "1994 institution" not in applicant_blob:
+            return False, "Opportunity is specifically for tribal colleges/1994 institutions."
 
     if client_groups and grant_groups and client_groups.isdisjoint(grant_groups):
         return False, "Program purpose does not match the submitted project's subject matter."
