@@ -1,0 +1,38 @@
+name: QA 30 client purpose relevance exact v3
+
+on:
+  push:
+    paths:
+      - '.github/workflows/qa-30-purpose-live-v3-exact.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      BASE_URL: https://grantforgeusa-v11-backend.onrender.com
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run canonical 30-client suite after exact v3 deployment
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/qa-30-purpose-live.yml').read_text()
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY\n"
+          start = text.index(start_marker) + len(start_marker)
+          end = text.index(end_marker, start)
+          lines = text[start:end].splitlines()
+          body = "\n".join(line[10:] if line.startswith("          ") else line for line in lines)
+          Path('/tmp/qa30.py').write_text(body)
+          PY
+          python /tmp/qa30.py
+      - name: Upload exact-v3 report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-30-purpose-report-v3-exact
+          path: qa-30-purpose-report.json
