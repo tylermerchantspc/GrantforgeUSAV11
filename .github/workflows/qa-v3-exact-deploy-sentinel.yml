@@ -1,0 +1,42 @@
+name: QA exact v3 deployment sentinel
+
+on:
+  push:
+    paths:
+      - '.github/workflows/qa-v3-exact-deploy-sentinel.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  sentinel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Wait for exact v3 behavior
+        env:
+          BASE_URL: https://grantforgeusa-v11-backend.onrender.com
+        run: |
+          python - <<'PY'
+          import json, os, time
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+          base=os.environ['BASE_URL'].rstrip('/')
+          payload={'organization':'Prairie State University','contactName':'GrantForge QA','contactEmail':'qa@example.com','zip':'56031','category':'Public College / University','state':'MN','annualBudget':50000000,'projectTitle':'Rural Agricultural STEM Career Pathways','amountRequested':150000,'timeline':'12 months','audience':'Rural K-14 students in southern Minnesota','keywords':'STEM, agriculture, rural youth, agricultural science, engineering, careers, career pathways','need':'Expand hands-on agricultural science, engineering, mentoring, and career pathways for rural students.','notes':'Public state-controlled accredited university; faculty-led education and extension project.'}
+          def post(p):
+              req=Request(base+'/questionnaire',data=json.dumps(p).encode(),headers={'Content-Type':'application/json'},method='POST')
+              try:
+                  with urlopen(req,timeout=90) as r:return r.status,json.loads(r.read().decode())
+              except HTTPError as exc:return exc.code,{'error':exc.read().decode(errors='replace')}
+          # Stage 2 still returned Tribal Colleges Research Grants Program for this ordinary public university.
+          for attempt in range(36):
+              st,out=post(payload)
+              titles=[str(r.get('title') or '') for r in (out.get('results') or [])] if isinstance(out,dict) else []
+              low=' | '.join(titles).lower()
+              print('V3_EXACT_SENTINEL',attempt+1,st,titles,flush=True)
+              if st==200 and isinstance(out,dict) and out.get('ok') is True and 'tribal colleges research' not in low:
+                  print('EXACT_V3_BEHAVIOR_OBSERVED')
+                  raise SystemExit(0)
+              time.sleep(15)
+          raise SystemExit('exact v3 matcher behavior not observed on Render')
+          PY
