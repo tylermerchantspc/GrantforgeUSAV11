@@ -1,0 +1,41 @@
+name: QA v2 deployment sentinel
+
+on:
+  push:
+    paths:
+      - '.github/workflows/qa-v2-deploy-sentinel.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  sentinel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait for v2 matcher behavior
+        env:
+          BASE_URL: https://grantforgeusa-v11-backend.onrender.com
+        run: |
+          python - <<'PY'
+          import json, os, time
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+          base=os.environ['BASE_URL'].rstrip('/')
+          payload={'organization':'Midwest Health Sciences University','contactName':'GrantForge QA','contactEmail':'qa@example.com','zip':'50309','category':'Private College / University','state':'IA','annualBudget':140000000,'projectTitle':'Rural Diabetes Prevention Implementation Study','amountRequested':650000,'timeline':'36 months','audience':'Adults at high risk for type 2 diabetes in rural counties','keywords':'diabetes prevention, rural health, implementation science, public health, health disparities','need':'Evaluate evidence-based diabetes prevention strategies in underserved rural communities.','notes':'Accredited private nonprofit university with faculty investigators and clinical partners.'}
+          def post(p):
+              req=Request(base+'/questionnaire',data=json.dumps(p).encode(),headers={'Content-Type':'application/json'},method='POST')
+              try:
+                  with urlopen(req,timeout=90) as r:return r.status,json.loads(r.read().decode())
+              except HTTPError as exc:return exc.code,{'error':exc.read().decode(errors='replace')}
+          bad=('anti-obesity','glioblastoma','brain initiative','aging')
+          for attempt in range(28):
+              st,out=post(payload)
+              titles=' | '.join(str(r.get('title') or '') for r in (out.get('results') or [])).lower() if isinstance(out,dict) else ''
+              print('V2_SENTINEL',attempt+1,st,titles,flush=True)
+              if st==200 and isinstance(out,dict) and out.get('ok') is True and not any(x in titles for x in bad):
+                  print('V2_DEPLOYED')
+                  raise SystemExit(0)
+              time.sleep(15)
+          raise SystemExit('v2 matcher behavior not observed on Render')
+          PY
