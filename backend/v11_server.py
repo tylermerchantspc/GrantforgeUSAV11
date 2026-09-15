@@ -816,9 +816,22 @@ _PURPOSE_GROUPS = {
         "agriculture", "agricultural", "farming", " farm ", "farmer", "soil", "crop", "livestock",
         "food sovereignty", "precision agriculture",
     ),
+    "diabetes": ("diabetes", "type 2 diabetes", "glycemic"),
+    "opioid": ("opioid", "overdose", "naloxone", "substance use disorder", "opioid use disorder"),
+    "mental_health": ("suicide", "mental health", "behavioral health", "psychiatr"),
+    "obesity": ("obesity", "anti-obesity", "weight management"),
+    "cancer": ("cancer", "glioblastoma", "oncology", "tumor"),
+    "neurology": ("brain", "neurolog", "neuroscience"),
+    "aging": ("aging", "geriatric", "alzheimer", "older adults"),
+    "flood_mitigation": ("flood", "stormwater", "storm water", "drainage", "hazard mitigation"),
+    "apprenticeship": ("apprenticeship", "apprentice", "registered apprenticeship"),
+    "food_sovereignty": ("food sovereignty", "tribal food sovereignty", "indigenous food sovereignty"),
+    "pollinator": ("pollinator", "pollinators", "bee habitat", "monarch habitat"),
+    "career_education": ("career pathway", "career pathways", "education and workforce", "workforce development", "experiential learning"),
     "clinical_health": (
         "clinical trial", "clinical study", "patient", "medical", "therapeutic", "treatment",
         "disease", "diabetes", "cancer", "glioblastoma", "obesity", "cardiovascular", "opioid",
+        "mental health", "behavioral health", "suicide",
     ),
     "conservation": (
         "endangered species", "wildlife", "habitat", "conservation", "forest", "forestry",
@@ -852,7 +865,16 @@ _PURPOSE_GROUPS = {
 _ANCHOR_REQUIRED_GROUPS = {
     "water_infrastructure", "cybersecurity", "victim_services", "homelessness", "food_access",
     "clinical_health", "conservation", "climate_earth", "housing", "arts_history",
-    "energy_efficiency", "business_rd",
+    "energy_efficiency", "business_rd", "diabetes", "opioid", "mental_health", "obesity",
+    "cancer", "neurology", "aging", "flood_mitigation", "apprenticeship", "food_sovereignty",
+    "pollinator", "career_education",
+}
+
+# These project purposes are narrow enough that a broad parent domain is not sufficient.
+# Example: a diabetes project may not purchase a glioblastoma grant merely because both are health research.
+_STRICT_PURPOSE_GROUPS = {
+    "diabetes", "opioid", "mental_health", "obesity", "cancer", "neurology", "aging",
+    "flood_mitigation", "apprenticeship", "food_sovereignty", "pollinator", "career_education",
 }
 
 
@@ -915,6 +937,20 @@ def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant
     client_has_rd_intent = any(term in client_blob for term in client_rd_signals) and not client_explicit_non_rd
     if any(term in grant_blob for term in rd_signals) and not client_has_rd_intent:
         return False, "Opportunity requires an R&D/pilot project not identified in the submitted project."
+
+    # Foreign-mission annual program statements are location/purpose-specific. Generic cultural
+    # or arts language is not enough for a domestic local project to qualify.
+    grant_title = str(gr.get("title") or "").lower()
+    if "u.s. mission to " in grant_title and not any(term in client_blob for term in (
+        "international", "international exchange", "cultural exchange", "diplomacy",
+        "foreign affairs", "export", "australia", "embassy",
+    )):
+        return False, "Foreign-mission opportunity does not match the submitted domestic project purpose."
+
+    strict_client_groups = client_groups & _STRICT_PURPOSE_GROUPS
+    missing_strict_groups = strict_client_groups - grant_groups
+    if missing_strict_groups:
+        return False, "Opportunity misses required project-specific purpose: " + ", ".join(sorted(missing_strict_groups)) + "."
 
     if client_groups and grant_groups and client_groups.isdisjoint(grant_groups):
         return False, "Program purpose does not match the submitted project's subject matter."
