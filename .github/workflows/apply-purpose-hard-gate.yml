@@ -16,6 +16,7 @@ jobs:
       LIVE_GRANTS_ENABLED: "false"
       STRIPE_SECRET_KEY: sk_test_ci_placeholder
       STRIPE_PUBLISHABLE_KEY: pk_test_ci_placeholder
+      PYTHONPATH: "."
     steps:
       - uses: actions/checkout@v4
         with:
