@@ -1,0 +1,154 @@
+name: QA 30 client purpose relevance live
+
+on:
+  push:
+    paths:
+      - '.github/workflows/qa-30-purpose-live.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Validate 30 deployed client profiles
+        env:
+          BASE_URL: https://grantforgeusa-v11-backend.onrender.com
+        run: |
+          python - <<'PY'
+          import json, os, time
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+
+          base=os.environ['BASE_URL'].rstrip('/')
+          def client(label,org,category,state,budget,project,amount,timeline,audience,keywords,need,notes,anchors,zip_code='56031'):
+              return {
+                'label':label,
+                'payload':{'organization':org,'contactName':'GrantForge QA','contactEmail':label.lower()+'@example.com','zip':zip_code,'category':category,'state':state,'annualBudget':budget,'projectTitle':project,'amountRequested':amount,'timeline':timeline,'audience':audience,'keywords':keywords,'need':need,'notes':notes},
+                'anchors':[a.lower() for a in anchors],
+              }
+
+          clients=[
+            # Original 15 regression profiles
+            client('C01_PUBLIC_UNI_AG_STEM','Prairie State University','Public College / University','MN',50000000,'Rural Agricultural STEM Career Pathways',150000,'12 months','Rural K-14 students in southern Minnesota','STEM, agriculture, rural youth, agricultural science, engineering, careers','Expand hands-on agricultural science, engineering, mentoring, and career pathways for rural students.','Public state-controlled accredited university; faculty-led education and extension project.',['agricultur','food','farm','stem','education']),
+            client('C02_K12_ROBOTICS','Prairie Ridge Middle School','K-12 School / District / Educator','MN',120000,'Rural Robotics Discovery Lab',18000,'2026-2027 school year','Middle school students','STEM, robotics, classroom technology, equipment','Expand hands-on robotics and engineering learning.','Public school district instructional project.',['robot','stem','education','engineering','school']),
+            client('C03_VETERANS_MEMORIAL','Martin County Veterans Memorial Fund','501(c)(3) Nonprofit','MN',90000,'Purple Heart Memorial Statue',50000,'May 2027','Local veterans families and visitors','memorial, veterans, park, public history','Install a permanent memorial at a county veterans park recognizing military service and sacrifice.','Local veterans organizations may assist.',['veteran','memorial','military','history','heritage']),
+            client('C04_SMALL_BIZ_ENERGY','North Star Fabrication LLC','Small Business','MN',380000,'Rural Manufacturing Energy Upgrade',90000,'12 months','Manufacturing employees and customers','small business, rural energy, energy efficiency, manufacturing','Reduce energy use by replacing inefficient production equipment.','Capital equipment efficiency and operational improvements.',['energy efficiency','energy','manufactur','equipment']),
+            client('C05_LOCAL_GOV_WATER','City of Prairie Junction','City / County / Local Government','MN',6200000,'Drinking Water Main Replacement and Lead Service Reduction',850000,'24 months','Residents served by municipal water system','drinking water, lead service lines, water infrastructure, rural community, public health','Replace aging water mains and reduce lead service line exposure in a small rural community.','City-owned public water system serving fewer than 10000 residents.',['drinking water','water infrastructure','water main','lead service','wastewater','sewer'],'56101'),
+            client('C06_TRIBAL_FOOD','Red River Tribal Community Council','Tribal Government / Organization','MN',8400000,'Tribal Food Sovereignty and Youth Agriculture Program',275000,'24 months','Tribal youth and families','tribal, food sovereignty, agriculture, youth, nutrition, community food systems','Increase local food production and culturally grounded agricultural education.','Federally recognized tribal government; gardens, training, and food distribution.',['agricultur','food','farm','nutrition'],'56601'),
+            client('C07_HOUSING_AUTHORITY','Prairie County Housing Authority','Public Housing Authority','MN',4100000,'Public Housing Energy and Accessibility Rehabilitation',600000,'18 months','Low-income seniors and families in public housing','public housing, energy efficiency, accessibility, rehabilitation, low income','Modernize aging public housing units to reduce energy costs and improve accessibility.','PHA-owned multifamily housing; insulation, HVAC, lighting, and accessibility upgrades.',['housing','rehabilitation','accessibility','multifamily','energy efficiency']),
+            client('C08_NONPROFIT_FOOD','Southern Prairie Food Network','501(c)(3) Nonprofit','MN',720000,'Rural Food Access Mobile Market',125000,'18 months','Low-income rural families and seniors','food insecurity, rural, mobile market, nutrition, local food, underserved communities','Rural residents lack transportation and nearby access to affordable nutritious food.','Nonprofit partnering with local farms, food shelves, and senior housing sites.',['food','nutrition','hunger','mobile market','food insecurity']),
+            client('C09_FAITH_SHELTER','Hope Community Church Outreach','Church / Faith Organization','AL',450000,'Winter Emergency Shelter and Meal Program',85000,'12 months','Adults and families experiencing homelessness','homelessness, emergency shelter, meals, outreach, housing stability','Provide temporary winter shelter, meals, and referral services.','Faith-based organization; secular social services open to all eligible participants.',['homeless','shelter','housing stability','emergency housing']),
+            client('C10_RESEARCH_WILDFIRE','Great Plains Research Foundation','Research Institution / University Research Foundation','SD',18000000,'Wildfire Smoke Exposure and Rural Community Resilience',425000,'36 months','Rural communities exposed to wildfire smoke','wildfire, smoke, public health, rural communities, resilience, exposure research','Quantify wildfire smoke exposure and test practical community resilience interventions.','Independent nonprofit research foundation with university and public-health partners.',['wildfire','smoke','air quality','exposure']),
+            client('C11_STATE_CYBER','Minnesota Office of Public Services','State Government / Agency','MN',95000000,'Rural Local Government Cybersecurity Modernization',1200000,'24 months','Small county and municipal governments','cybersecurity, state government, local government, rural, critical infrastructure, resilience','Improve cybersecurity capacity for small local governments without dedicated security staff.','State agency would administer assessments, training, shared services, and incident response.',['cyber','information security','network security','ransomware','incident response']),
+            client('C12_PRIVATE_UNI_HEALTH','Midwest Health Sciences University','Private College / University','IA',140000000,'Rural Diabetes Prevention Implementation Study',650000,'36 months','Adults at high risk for type 2 diabetes in rural counties','diabetes prevention, rural health, implementation science, public health, health disparities','Evaluate evidence-based diabetes prevention strategies in underserved rural communities.','Accredited private nonprofit university with faculty investigators and clinical partners.',['diabetes','type 2','metabolic']),
+            client('C13_SMALL_BIZ_AGTECH','FieldSense AgTech LLC','Small Business','IA',650000,'Low-Cost Soil Nutrient Sensor for Small Farms',250000,'18 months','Small and midsize agricultural producers','SBIR, agriculture technology, soil sensor, precision agriculture, small farms, research and development','Develop and validate a lower-cost soil nutrient sensor for fertilizer decisions.','US-owned for-profit small business performing R&D and prototype development in the United States.',['soil','agricultur','farm','sensor','precision agriculture','sbir']),
+            client('C14_INDIVIDUAL_ARTIST','Independent Applicant','Individual / Independent Applicant','VA',50000,'Civil War Heritage Photography Book',30000,'12 months','General public and local history readers','photography, history, Civil War, book publication, heritage','Photograph and publish a book documenting regional Civil War heritage sites.','Individual applicant with no nonprofit or government fiscal sponsor.',['photograph','history','heritage','humanities','arts']),
+            client('C15_NONPROFIT_DV','Safe Harbor Family Services','501(c)(3) Nonprofit','TN',1300000,'Rural Domestic Violence Legal Advocacy and Safety Services',300000,'24 months','Survivors of domestic violence in rural counties','domestic violence, victim services, legal advocacy, rural, safety planning, underserved','Expand trauma-informed legal advocacy, safety planning, and coordinated victim services.','Nonprofit victim-service provider with law-enforcement and legal-aid partnerships.',['domestic violence','victim','legal advocacy','sexual assault','violence against women']),
+
+            # 15 unseen profiles
+            client('N01_COUNTY_OPIOID','Pine Valley County Health Department','City / County / Local Government','WV',9200000,'Rural Opioid Overdose Prevention and Recovery Network',450000,'24 months','Residents with opioid use disorder and their families','opioid, overdose prevention, substance use disorder, recovery, naloxone, rural health','Reduce fatal overdoses and expand evidence-based treatment and recovery navigation.','County health department partnering with EMS and behavioral-health providers.',['opioid','overdose','substance use','addiction','naloxone'],'25301'),
+            client('N02_TRIBAL_BROADBAND','Prairie River Tribal Nation','Tribal Government / Organization','ND',21000000,'Tribal Broadband Last-Mile Expansion',2200000,'30 months','Tribal households and community facilities','broadband, tribal, internet access, digital divide, last mile, infrastructure','Extend reliable high-speed internet to unserved tribal households and public facilities.','Federally recognized tribal government; fiber and fixed-wireless construction.',['broadband','internet','telecommunications','digital divide','connectivity'],'58501'),
+            client('N03_CHILDCARE','Little Horizons Community Center','501(c)(3) Nonprofit','MN',980000,'Rural Child Care Capacity Expansion',210000,'18 months','Working families with young children','child care, childcare, early childhood, rural families, workforce','Expand licensed child-care slots and workforce capacity in a rural child-care desert.','Nonprofit center will renovate classrooms and recruit qualified staff.',['child care','childcare','early childhood','preschool']),
+            client('N04_FLOOD','Riverbend County','City / County / Local Government','IA',14500000,'Flood Mitigation and Stormwater Resilience Project',1400000,'30 months','Residents and businesses in flood-prone neighborhoods','flood mitigation, stormwater, drainage, resilience, hazard mitigation, infrastructure','Reduce repetitive flood damage through drainage, stormwater, and mitigation improvements.','County-led capital project informed by hazard mitigation planning.',['flood','stormwater','hazard mitigation','drainage','resilience'],'52401'),
+            client('N05_CONSERVATION_RESEARCH','Northern Plains State University','Public College / University','MT',88000000,'Prairie Pollinator Habitat Restoration Research',520000,'36 months','Agricultural landscapes and native pollinator populations','pollinator, habitat restoration, conservation, agriculture, ecology, research','Study restoration methods that improve pollinator habitat in working agricultural landscapes.','Faculty-led ecological field research with producer partners.',['pollinator','habitat','conservation','ecology','species'],'59715'),
+            client('N06_MANUFACTURING_RD','Frontier Automation LLC','Small Business','OH',1100000,'AI-Guided Robotic Quality Inspection Prototype',275000,'18 months','Small and midsize manufacturers','SBIR, robotics, manufacturing, prototype, computer vision, research and development','Develop and validate a robotic inspection prototype for manufacturing defects.','US-owned small business; explicit R&D, prototype testing, and commercialization plan.',['robot','manufactur','prototype','sbir','automation','inspection'],'43215'),
+            client('N07_CHURCH_FOOD','Grace Community Outreach','Church / Faith Organization','KY',360000,'Community Food Pantry Cold Storage Expansion',65000,'12 months','Food-insecure households','food pantry, hunger, nutrition, cold storage, food access','Increase fresh-food distribution by adding refrigerated storage and distribution capacity.','Faith-based pantry provides services without religious participation requirements.',['food','pantry','hunger','nutrition','food access'],'40202'),
+            client('N08_PHA_SERVICES','Metro Homes Authority','Public Housing Authority','MO',12500000,'Resident Employment and Digital Skills Program',180000,'18 months','Adults living in public housing','public housing, resident services, employment, digital skills, workforce','Help public-housing residents build digital and employment skills and connect to jobs.','PHA resident-services program with workforce partners.',['housing','resident','employment','digital skills','workforce'],'64106'),
+            client('N09_APPRENTICESHIP','Iowa Workforce Development Agency','State Government / Agency','IA',180000000,'Advanced Manufacturing Registered Apprenticeship Expansion',1800000,'36 months','Workers and employers in advanced manufacturing','registered apprenticeship, workforce, manufacturing, skills, employers','Expand registered apprenticeship programs in high-demand manufacturing occupations.','State workforce agency working with employers, community colleges, and labor partners.',['apprentice','workforce','manufactur','employment','job training'],'50319'),
+            client('N10_K12_LITERACY','Lake Prairie School District','K-12 School / District / Educator','MN',18500000,'K-3 Evidence-Based Literacy Improvement',320000,'24 months','Kindergarten through third-grade students','literacy, reading, K-3, teachers, evidence-based instruction, school','Improve early reading outcomes through teacher training and evidence-based literacy instruction.','Public school district serving rural and low-income students.',['literacy','reading','education','school','teacher'],'56031'),
+            client('N11_ARTS_NONPROFIT','Blue Ridge Heritage Arts Council','501(c)(3) Nonprofit','VA',540000,'Appalachian Traditional Arts Preservation Program',95000,'18 months','Traditional artists, youth, and rural communities','arts, cultural heritage, folk music, traditional arts, humanities, preservation','Document, teach, and preserve regional traditional arts and folk-music practices.','Nonprofit arts council partnering with museums and community artists.',['arts','heritage','humanities','music','culture'],'24333'),
+            client('N12_EXPORT','Heartland Medical Devices LLC','Small Business','MN',2400000,'International Market Expansion for Medical Device Exports',175000,'18 months','US manufacturing employees and international distributors','export, small business, international trade, market development, medical devices','Expand compliant export sales into new international markets.','Established US manufacturer; project is market expansion, not product R&D.',['export','trade','international market','market development','commerce']),
+            client('N13_FIRE','Prairie Volunteer Fire Department','Nonprofit / Community Organization','KS',410000,'Wildland Fire Protective Equipment Replacement',160000,'12 months','Volunteer firefighters and rural residents','fire department, firefighter, protective equipment, wildland fire, emergency response','Replace aging PPE and response equipment used for rural wildland and structure fires.','Volunteer fire department serving multiple rural townships.',['fire','firefighter','emergency response','wildland','protective equipment'],'67401'),
+            client('N14_MENTAL_HEALTH_RESEARCH','St. Catherine Behavioral Health University','Private College / University','WI',96000000,'Rural Adolescent Suicide Prevention Research',725000,'36 months','Adolescents in rural communities','suicide prevention, adolescent mental health, behavioral health, rural, clinical research','Evaluate a community-linked suicide-prevention intervention for rural adolescents.','Private nonprofit university with IRB and clinical research partners.',['suicide','mental health','behavioral health','adolescent','psychiatr'],'53703'),
+            client('N15_SENIOR_TRANSPORT','Golden Years Mobility Network','501(c)(3) Nonprofit','MN',860000,'Rural Senior Non-Emergency Transportation Expansion',240000,'24 months','Older adults and adults with disabilities','senior transportation, mobility, rural, older adults, disability, access','Expand accessible non-emergency transportation to medical care and essential services.','Nonprofit mobility provider coordinating volunteer and wheelchair-accessible transportation.',['transport','mobility','older adult','senior','transit','disability'])
+          ]
+
+          def post(path,payload,timeout=90):
+              req=Request(base+path,data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST')
+              try:
+                  with urlopen(req,timeout=timeout) as r: return r.status,json.loads(r.read().decode())
+              except HTTPError as exc:
+                  raw=exc.read().decode(errors='replace')
+                  try: data=json.loads(raw)
+                  except Exception: data={'raw':raw}
+                  return exc.code,data
+              except Exception as exc: return 0,{'error':repr(exc)}
+
+          # Wait for Render to serve the hardened matcher. Old backend returned global-health/BRAIN
+          # grants for this water project; the hardened matcher must not.
+          water=next(c for c in clients if c['label']=='C05_LOCAL_GOV_WATER')
+          stale=True
+          for attempt in range(24):
+              st,out=post('/questionnaire',water['payload'])
+              titles=' '.join(str(r.get('title') or '') for r in (out.get('results') or [])).lower() if isinstance(out,dict) else ''
+              stale=any(x in titles for x in ('advancing global health','brain initiative','alzheimer'))
+              print('DEPLOY_SENTINEL',attempt+1,st,[r.get('title') for r in (out.get('results') or [])] if isinstance(out,dict) else out,flush=True)
+              if st==200 and isinstance(out,dict) and out.get('ok') is True and not stale:
+                  break
+              time.sleep(15)
+          assert not stale, 'Render still serves pre-hardening matcher behavior'
+
+          report=[]
+          semantic_failures=[]
+          transport_failures=[]
+          expired_ids={'310029','363174'}
+          known_junk=('advancing oil and natural gas production','advanced nuclear energy licensing','radioactive materials transportation','accelerating scale-up and pre-piloting of emerging chemical technologies')
+
+          for c in clients:
+              st,out=post('/questionnaire',c['payload'])
+              results=(out.get('results') or []) if isinstance(out,dict) else []
+              if st!=200 or not isinstance(out,dict) or out.get('ok') is not True:
+                  transport_failures.append(c['label'])
+              row={'label':c['label'],'project':c['payload']['projectTitle'],'status':st,'count':len(results),'results':[]}
+              for r in results:
+                  blob=' '.join([str(r.get('title') or ''),str(r.get('summary') or ''),str(r.get('sector') or ''),str(r.get('program') or '')]).lower()
+                  anchored=any(a in blob for a in c['anchors'])
+                  row['results'].append({'opp_id':r.get('opp_id'),'title':r.get('title'),'fit':r.get('fit'),'purchasable':r.get('purchasable'),'sector':r.get('sector'),'anchored':anchored})
+                  if r.get('purchasable') is True and not anchored:
+                      semantic_failures.append((c['label'],r.get('title'),'missing project anchor'))
+                  if str(r.get('opp_id')) in expired_ids:
+                      semantic_failures.append((c['label'],r.get('title'),'expired/notice regression'))
+                  low=blob.lower()
+                  if any(j in low for j in known_junk):
+                      semantic_failures.append((c['label'],r.get('title'),'known irrelevant regression'))
+              report.append(row)
+              print('\nCLIENT',c['label'],c['payload']['projectTitle'])
+              print(json.dumps(row,indent=2),flush=True)
+
+          # Confirm at least one known-positive path still produces a purchase-ready grant.
+          positive=next(r for r in report if r['label']=='C01_PUBLIC_UNI_AG_STEM')
+          assert any(x.get('purchasable') and x.get('anchored') for x in positive['results']), positive
+
+          # Exercise preview + Stripe test checkout on one valid positive only, avoiding rate-limit noise.
+          st,out=post('/questionnaire',next(c for c in clients if c['label']=='C01_PUBLIC_UNI_AG_STEM')['payload'])
+          target=next(r for r in out.get('results',[]) if r.get('purchasable') is True)
+          selected=dict(next(c for c in clients if c['label']=='C01_PUBLIC_UNI_AG_STEM')['payload']); selected['grant']=target
+          pst,preview=post('/preview',selected)
+          cst,checkout=post('/create-checkout-session',selected)
+          flow={'preview_status':pst,'preview_ok':bool(isinstance(preview,dict) and preview.get('ok') is True),'checkout_status':cst,'checkout_ok':bool(isinstance(checkout,dict) and checkout.get('ok') is True),'stripe_test_url':str(checkout.get('url','')).startswith('https://checkout.stripe.com/') if isinstance(checkout,dict) else False}
+          print('\nFLOW_CHECK',json.dumps(flow,indent=2),flush=True)
+
+          with open('qa-30-purpose-report.json','w') as f:
+              json.dump({'report':report,'semantic_failures':semantic_failures,'transport_failures':transport_failures,'flow':flow},f,indent=2)
+
+          print('\nSUMMARY')
+          print('clients',len(report))
+          print('transport_failures',transport_failures)
+          print('semantic_failures',semantic_failures)
+          print('with_results',sum(1 for r in report if r['count']))
+          print('purchase_ready',sum(1 for r in report for x in r['results'] if x.get('purchasable')))
+          print('flow',flow)
+          assert len(report)==30
+          assert not transport_failures
+          assert not semantic_failures
+          assert flow['preview_ok'] and flow['checkout_ok'] and flow['stripe_test_url']
+          PY
+      - name: Upload 30-client QA report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-30-purpose-report
+          path: qa-30-purpose-report.json
