@@ -188,3 +188,26 @@ def test_career_pathway_rejects_generic_ag_trade_even_if_summary_mentions_workfo
         "HIGHER_ED_PUBLIC",
     )
     assert ok is False
+
+
+def test_operational_opioid_program_rejects_clinical_research_mechanism():
+    ok, _ = check(
+        grant("Exploratory Clinical Neuroscience Research on Substance Use Disorders (R61/R33 Clinical Trial Optional)", "Clinical neuroscience research on substance use disorders."),
+        payload("Rural Opioid Overdose Prevention and Recovery Network", "opioid, overdose prevention, substance use disorder, recovery, naloxone", "Reduce fatal overdoses and expand evidence-based treatment and recovery navigation.", "County health department partnering with EMS and behavioral-health providers."),
+        "GOV_LOCAL",
+    )
+    assert ok is False
+
+
+def test_explicit_opioid_research_study_can_use_research_mechanism():
+    ok, _ = check(
+        grant("Exploratory Clinical Neuroscience Research on Substance Use Disorders (R61/R33 Clinical Trial Optional)", "Clinical neuroscience research on substance use disorders and addiction."),
+        payload("Opioid Recovery Intervention Research Study", "opioid, substance use disorder, clinical research", "Evaluate a clinical intervention for opioid use disorder.", "University investigators will conduct the research study."),
+        "HIGHER_ED_PUBLIC",
+    )
+    assert ok is True
+
+
+def test_ag_education_research_initiative_name_does_not_force_research_mode():
+    gr = grant("Agriculture and Food Research Initiative Competitive Grants Program Education and Workforce Development", "Agricultural education, experiential learning, and workforce development.")
+    assert srv._grant_requires_research_mode(gr) is False

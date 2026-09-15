@@ -919,6 +919,28 @@ def _purpose_overlap_terms(gr: Dict[str, Any], payload: Dict[str, Any]) -> set[s
     return _purpose_tokens(_purpose_text(gr)) & _purpose_tokens(_client_purpose_text(payload))
 
 
+def _grant_requires_research_mode(gr: Dict[str, Any]) -> bool:
+    """Identify opportunities whose award mechanism is specifically research/clinical-study work."""
+    title = str(gr.get("title") or "")
+    upper = title.upper()
+    if re.search(r"\b(?:R01|R03|R15|R21|R34|R35|R61|R33|P50|P30|U01|U19|UG3|UH3)\b", upper):
+        return True
+    lowered = title.lower()
+    return any(term in lowered for term in (
+        "clinical trial", "clinical neuroscience research", "research center",
+        "research centers", "investigator-initiated research", "translational research",
+    ))
+
+
+def _client_has_research_mode(payload: Dict[str, Any]) -> bool:
+    blob = _client_purpose_text(payload)
+    return any(term in blob for term in (
+        "research", " study", "study ", "clinical trial", "clinical research",
+        "investigator", "evaluate", "evaluation", "r&d", "research and development",
+        "prototype", "proof of concept", "commercialization", "experimental",
+    ))
+
+
 def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant_type: str) -> Tuple[bool, str]:
     """Hard program-purpose gate. Eligibility may narrow candidates but can never create relevance."""
     grant_blob = _purpose_text(gr)
@@ -951,6 +973,11 @@ def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant
     client_has_rd_intent = any(term in client_blob for term in client_rd_signals) and not client_explicit_non_rd
     if any(term in grant_blob for term in rd_signals) and not client_has_rd_intent:
         return False, "Opportunity requires an R&D/pilot project not identified in the submitted project."
+
+    # A service-delivery or capital project must never become purchasable merely because its
+    # subject appears in a clinical/research NOFO. Research mechanisms require explicit research intent.
+    if _grant_requires_research_mode(gr) and not _client_has_research_mode(payload):
+        return False, "Opportunity requires a research/clinical-study project, but the submitted project is operational/service delivery."
 
     # Foreign-mission annual program statements are location/purpose-specific. Generic cultural
     # or arts language is not enough for a domestic local project to qualify.

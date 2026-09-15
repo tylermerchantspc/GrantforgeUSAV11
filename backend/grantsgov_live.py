@@ -178,9 +178,46 @@ def _eligibility_tags(descriptions: Iterable[str]) -> List[str]:
     return list(dict.fromkeys(tag for tag in tags if tag))
 
 
-def _canonical_sector(activity_codes: Iterable[str]) -> str:
+def _canonical_sector(activity_codes: Iterable[str], title: str = "", summary: str = "") -> str:
+    """Classify the opportunity by its actual purpose first, then use Grants.gov category codes as fallback."""
+    blob = f"{title} {summary}".lower()
+
+    text_rules = [
+        ("victim services / justice", ("domestic violence", "sexual assault", "victim service", "crime victim", "violence and abuse", "violence against women")),
+        ("cybersecurity / technology", ("cybersecurity", "cyber security", "ransomware", "information security", "network security")),
+        ("water / infrastructure", ("drinking water", "wastewater", "sewer", "water main", "lead service", "stormwater", "water infrastructure")),
+        ("food access / nutrition", ("food insecurity", "food pantry", "food bank", "mobile market", "hunger", "nutrition assistance", "food access")),
+        ("agriculture / rural development", ("agriculture", "agricultural", "farming", "farmer", "crop", "livestock", "soil", "food research initiative")),
+        ("public safety / emergency management", ("firefighter", "fire department", "wildland fire", "emergency response", "disaster preparedness")),
+        ("conservation / environment", ("endangered species", "wildlife", "habitat", "conservation", "pollinator", "ecosystem", "forestry")),
+        ("arts / culture", ("arts", "artistic", "humanities", "cultural heritage", "museum", "historic preservation")),
+        ("housing / community development", ("public housing", "affordable housing", "housing rehabilitation", "homeless", "emergency shelter")),
+        ("energy / manufacturing efficiency", ("energy efficiency", "renewable energy", "energy use", "manufacturing efficiency")),
+        ("workforce development", ("apprenticeship", "apprentice", "workforce development", "job training", "employment training")),
+        ("education / STEM", ("education", "student", "school", "teacher", "literacy", "classroom", "career pathway")),
+        ("telehealth / healthcare", ("clinical", "medical", "disease", "diabetes", "opioid", "substance use", "mental health", "behavioral health", "healthcare", "health care")),
+        ("entrepreneurship / innovation", ("small business innovation", "sbir", "sttr", "commercialization", "technology development", "prototype")),
+    ]
+    for sector, phrases in text_rules:
+        if any(phrase in blob for phrase in phrases):
+            return sector
+
     code_set = {str(code or "").strip() for code in activity_codes}
-    for sector, codes in SECTOR_FUNDING_CODES.items():
+    fallback = [
+        ("victim services / justice", {"LJL"}),
+        ("agriculture / rural development", {"AG", "RD"}),
+        ("food access / nutrition", {"FN"}),
+        ("telehealth / healthcare", {"HL"}),
+        ("housing / community development", {"HO", "CD"}),
+        ("public safety / emergency management", {"DPR"}),
+        ("conservation / environment", {"ENV", "NR"}),
+        ("arts / culture", {"AR", "HU"}),
+        ("energy / manufacturing efficiency", {"EN"}),
+        ("workforce development", {"ELT"}),
+        ("education / STEM", {"ED"}),
+        ("entrepreneurship / innovation", {"BC", "ST"}),
+    ]
+    for sector, codes in fallback:
         if code_set.intersection(codes):
             return sector
     return ""
@@ -252,7 +289,7 @@ def _detail_to_grant(hit: Dict[str, Any], detail: Dict[str, Any]) -> Dict[str, A
         "eligibility_text": eligibility_text,
         "funding_category_codes": activity_codes,
         "tags": tags[:200],
-        "sector": _canonical_sector(activity_codes),
+        "sector": _canonical_sector(activity_codes, title, summary),
         "sector_labels": activity_categories[:3],
         "summary": summary[:5000],
         "cost_sharing_required": _parse_boolish(synopsis.get("costSharing")),
