@@ -1,0 +1,47 @@
+name: QA exact v4 deployment sentinel
+
+on:
+  push:
+    paths:
+      - '.github/workflows/qa-v4-exact-deploy-sentinel.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  sentinel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Wait for exact v4 behavior
+        env:
+          BASE_URL: https://grantforgeusa-v11-backend.onrender.com
+        run: |
+          python - <<'PY'
+          import json, os, time
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+          base=os.environ['BASE_URL'].rstrip('/')
+          def post(payload):
+              req=Request(base+'/questionnaire',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST')
+              try:
+                  with urlopen(req,timeout=90) as r:return r.status,json.loads(r.read().decode())
+              except HTTPError as exc:return exc.code,{'error':exc.read().decode(errors='replace')}
+          ag={'organization':'Prairie State University','contactName':'GrantForge QA','contactEmail':'qa@example.com','zip':'56031','category':'Public College / University','state':'MN','annualBudget':50000000,'projectTitle':'Rural Agricultural STEM Career Pathways','amountRequested':150000,'timeline':'12 months','audience':'Rural K-14 students in southern Minnesota','keywords':'STEM, agriculture, rural youth, agricultural science, engineering, careers, career pathways','need':'Expand hands-on agricultural science, engineering, mentoring, and career pathways for rural students.','notes':'Public state-controlled accredited university; faculty-led education and extension project.'}
+          dv={'organization':'Safe Harbor Family Services','contactName':'GrantForge QA','contactEmail':'qa@example.com','zip':'37201','category':'501(c)(3) Nonprofit','state':'TN','annualBudget':1300000,'projectTitle':'Rural Domestic Violence Legal Advocacy and Safety Services','amountRequested':300000,'timeline':'24 months','audience':'Survivors of domestic violence in rural counties','keywords':'domestic violence, victim services, legal advocacy, rural, safety planning, underserved','need':'Expand trauma-informed legal advocacy, safety planning, and coordinated victim services.','notes':'Nonprofit victim-service provider with law-enforcement and legal-aid partnerships.'}
+          opioid={'organization':'Pine Valley County Health Department','contactName':'GrantForge QA','contactEmail':'qa@example.com','zip':'25301','category':'City / County / Local Government','state':'WV','annualBudget':9200000,'projectTitle':'Rural Opioid Overdose Prevention and Recovery Network','amountRequested':450000,'timeline':'24 months','audience':'Residents with opioid use disorder and their families','keywords':'opioid, overdose prevention, substance use disorder, recovery, naloxone, rural health','need':'Reduce fatal overdoses and expand evidence-based treatment and recovery navigation.','notes':'County health department partnering with EMS and behavioral-health providers.'}
+          for attempt in range(36):
+              ast,ao=post(ag); dst,do=post(dv); ost,oo=post(opioid)
+              ar=ao.get('results') or [] if isinstance(ao,dict) else []
+              dr=do.get('results') or [] if isinstance(do,dict) else []
+              orr=oo.get('results') or [] if isinstance(oo,dict) else []
+              print('V4_SENTINEL',attempt+1,'AG',[(r.get('title'),r.get('sector')) for r in ar],'DV',[(r.get('title'),r.get('sector')) for r in dr],'OPIOID',[(r.get('title'),r.get('sector')) for r in orr],flush=True)
+              ag_ok=ast==200 and any(str(r.get('opp_id'))=='361169' and r.get('sector')=='agriculture / rural development' for r in ar)
+              dv_ok=dst==200 and any(str(r.get('opp_id'))=='363568' and r.get('sector')=='victim services / justice' for r in dr)
+              opioid_ok=ost==200 and not any('exploratory clinical neuroscience research on substance use disorders' in str(r.get('title') or '').lower() for r in orr)
+              if ag_ok and dv_ok and opioid_ok:
+                  print('EXACT_V4_BEHAVIOR_OBSERVED')
+                  raise SystemExit(0)
+              time.sleep(15)
+          raise SystemExit('exact v4 matcher behavior not observed on Render')
+          PY
