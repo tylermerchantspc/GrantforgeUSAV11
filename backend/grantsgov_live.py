@@ -46,6 +46,10 @@ APPLICANT_ELIGIBILITY_CODES = {
 }
 
 SECTOR_FUNDING_CODES = {
+    "water / infrastructure": ["CD", "ENV", "NR"],
+    "cybersecurity / technology": ["ST", "LJL", "DPR"],
+    "victim services / justice": ["LJL"],
+    "food access / nutrition": ["FN", "AG", "CD"],
     "education / STEM": ["ED", "ST"],
     "workforce development": ["ELT"],
     "telehealth / healthcare": ["HL"],

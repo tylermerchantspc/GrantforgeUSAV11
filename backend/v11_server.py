@@ -750,41 +750,155 @@ def _funding_range_compatible(gr: Dict[str, Any], amount: float) -> Tuple[bool, 
         return False, f"Requested amount (${amount:,.0f}) exceeds this opportunity's maximum (${maximum:,.0f})."
     return True, ""
 
+def _purpose_text(gr: Dict[str, Any]) -> str:
+    """Return only opportunity-purpose text; exclude applicant eligibility metadata."""
+    labels = gr.get("sector_labels") or []
+    if not isinstance(labels, list):
+        labels = []
+    return " ".join([
+        str(gr.get("title") or ""),
+        str(gr.get("program") or ""),
+        str(gr.get("summary") or ""),
+        " ".join(str(label) for label in labels),
+    ]).lower()
+
+
+def _client_purpose_text(payload: Dict[str, Any]) -> str:
+    return " ".join([
+        str(payload.get("projectTitle") or ""),
+        str(payload.get("keywords") or ""),
+        str(payload.get("need") or ""),
+        str(payload.get("notes") or ""),
+        str(payload.get("audience") or ""),
+    ]).lower()
+
+
+_PURPOSE_STOPWORDS = {
+    "about", "access", "across", "agency", "applicant", "application", "available",
+    "benefit", "benefits", "county", "community", "communities", "federal", "funding",
+    "government", "grant", "grants", "health", "help", "improve", "improving", "initiative",
+    "local", "million", "national", "nonprofit", "organization", "organizations", "people",
+    "program", "programs", "project", "projects", "provide", "providing", "public", "research",
+    "rural", "service", "services", "state", "states", "study", "support", "system", "systems",
+    "technology", "training", "university", "workforce", "year", "years",
+}
+
+_PURPOSE_TOKEN_ALIASES = {
+    "agricultural": "agriculture", "farming": "farm", "farms": "farm",
+    "students": "student", "educators": "educator", "schools": "school",
+    "cybersecurity": "cyber", "cyber-security": "cyber",
+    "victims": "victim", "survivors": "survivor",
+    "homelessness": "homeless", "historic": "history", "historical": "history",
+    "photographic": "photography", "nutritional": "nutrition",
+}
+
+_PURPOSE_GROUPS = {
+    "water_infrastructure": (
+        "drinking water", "wastewater", "waste water", "sewer", "water main", "water mains",
+        "lead service", "stormwater", "storm water", "water infrastructure", "water treatment",
+    ),
+    "cybersecurity": (
+        "cybersecurity", "cyber security", "ransomware", "information security", "network security",
+        "incident response", "security operations",
+    ),
+    "victim_services": (
+        "domestic violence", "sexual assault", "victim services", "victim service", "crime victim",
+        "legal advocacy", "safety planning", "human trafficking",
+    ),
+    "homelessness": (
+        "homeless", "homelessness", "emergency shelter", "transitional shelter", "housing stability",
+    ),
+    "food_access": (
+        "food insecurity", "food access", "mobile market", "food pantry", "food bank", "hunger",
+        "nutrition assistance", "healthy food access",
+    ),
+    "agriculture": (
+        "agriculture", "agricultural", "farming", " farm ", "farmer", "soil", "crop", "livestock",
+        "food sovereignty", "precision agriculture",
+    ),
+    "clinical_health": (
+        "clinical trial", "clinical study", "patient", "medical", "therapeutic", "treatment",
+        "disease", "diabetes", "cancer", "glioblastoma", "obesity", "cardiovascular", "opioid",
+    ),
+    "conservation": (
+        "endangered species", "wildlife", "habitat", "conservation", "forest", "forestry",
+        "land acquisition", "ecosystem", "biodiversity",
+    ),
+    "climate_earth": (
+        "climate", "earth system", "atmospheric", "ocean", "meteorological", "weather science",
+    ),
+    "education_stem": (
+        "education", "educational", "school", "student", "teacher", "stem", "robotics", "classroom",
+        "career pathway", "career pathways",
+    ),
+    "housing": (
+        "public housing", "affordable housing", "housing rehabilitation", "housing rehab",
+        "multifamily housing", "accessibility rehabilitation",
+    ),
+    "arts_history": (
+        "photography", "museum", "history", "historic", "heritage", "humanities", "arts", "artistic",
+        "book publication", "cultural heritage",
+    ),
+    "energy_efficiency": (
+        "energy efficiency", "renewable energy", "rural energy", "energy use", "hvac",
+        "equipment efficiency", "energy upgrade",
+    ),
+    "business_rd": (
+        "sbir", "sttr", "prototype", "commercialization", "research and development", "r&d",
+        "technology development", "proof of concept",
+    ),
+}
+
+_ANCHOR_REQUIRED_GROUPS = {
+    "water_infrastructure", "cybersecurity", "victim_services", "homelessness", "food_access",
+    "clinical_health", "conservation", "climate_earth", "housing", "arts_history",
+    "energy_efficiency", "business_rd",
+}
+
+
+def _purpose_groups(text: str) -> set[str]:
+    padded = f" {str(text or '').lower()} "
+    return {
+        group for group, phrases in _PURPOSE_GROUPS.items()
+        if any(phrase in padded for phrase in phrases)
+    }
+
+
+def _purpose_tokens(text: str) -> set[str]:
+    out: set[str] = set()
+    for raw in re.findall(r"[a-z0-9][a-z0-9-]+", str(text or "").lower()):
+        token = _PURPOSE_TOKEN_ALIASES.get(raw, raw)
+        if len(token) < 4 or token in _PURPOSE_STOPWORDS:
+            continue
+        if token.endswith("ies") and len(token) > 5:
+            token = token[:-3] + "y"
+        elif token.endswith("s") and len(token) > 5 and not token.endswith(("ss", "us", "is")):
+            token = token[:-1]
+        if token not in _PURPOSE_STOPWORDS:
+            out.add(token)
+    return out
+
+
+def _purpose_overlap_terms(gr: Dict[str, Any], payload: Dict[str, Any]) -> set[str]:
+    return _purpose_tokens(_purpose_text(gr)) & _purpose_tokens(_client_purpose_text(payload))
+
+
 def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant_type: str) -> Tuple[bool, str]:
-    """Reject broad-keyword cross-domain matches before they reach a customer."""
-    grant_blob = " ".join([
-        str(gr.get("title") or ""), str(gr.get("summary") or ""),
-        " ".join(str(t) for t in gr.get("tags", [])), str(gr.get("sector") or ""),
-    ]).lower()
-    client_blob = " ".join([
-        str(payload.get("projectTitle") or ""), str(payload.get("keywords") or ""),
-        str(payload.get("need") or ""), str(payload.get("notes") or ""),
-    ]).lower()
+    """Hard program-purpose gate. Eligibility may narrow candidates but can never create relevance."""
+    grant_blob = _purpose_text(gr)
+    client_blob = _client_purpose_text(payload)
+    client_groups = _purpose_groups(client_blob)
+    grant_groups = _purpose_groups(grant_blob)
+    overlap = _purpose_overlap_terms(gr, payload)
 
-    broad = {
-        "project", "program", "support", "services", "community", "federal", "grant",
-        "funding", "technology", "equipment", "training", "workforce", "energy",
-        "business", "small", "rural", "development", "improve", "improvement",
-    }
-    client_terms = {
-        w for w in re.findall(r"[a-z0-9]+", client_blob)
-        if len(w) >= 5 and w not in broad
-    }
-    grant_terms = set(re.findall(r"[a-z0-9]+", grant_blob))
-    distinctive_overlap = client_terms & grant_terms
-
-    # Strong domain conflicts must be explicitly present in the customer's project.
     conflict_terms = {"nuclear", "radioactive", "petroleum", "pipeline"}
-    if (conflict_terms & grant_terms) and not (conflict_terms & set(re.findall(r"[a-z0-9]+", client_blob))):
+    grant_terms = _purpose_tokens(grant_blob)
+    client_terms = _purpose_tokens(client_blob)
+    if (conflict_terms & grant_terms) and not (conflict_terms & client_terms):
         return False, "Opportunity subject matter conflicts with the submitted project."
     if ("oil" in grant_terms or ("natural" in grant_terms and "gas" in grant_terms)) and not any(x in client_blob for x in ("oil", "natural gas", "petroleum")):
         return False, "Opportunity is focused on oil/gas rather than the submitted project."
-    if "tribal" in grant_terms and "tribal" not in client_blob:
-        return False, "Opportunity is focused on Tribal programs not identified in the intake."
 
-    # Do not confuse capital/operational improvement projects with research, prototype,
-    # emerging-technology, scale-up, or pre-pilot funding simply because both mention
-    # manufacturing, energy, equipment, or technology.
     rd_signals = (
         "research and development", "research & development", "r&d", "prototype",
         "pre-pilot", "prepilot", "pre-piloting", "scale-up", "scale up",
@@ -794,23 +908,30 @@ def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant
         "research", "r&d", "prototype", "pilot", "scale-up", "scale up",
         "chemical technolog", "demonstration", "proof of concept", "commercialization",
     )
-    client_explicit_non_rd = any(
-        term in client_blob
-        for term in (
-            "not an r&d", "not r&d", "not a research project", "not a pilot",
-            "not a prototype", "capital equipment efficiency", "operational improvements",
-            "equipment upgrade", "equipment replacement",
-        )
-    )
+    client_explicit_non_rd = any(term in client_blob for term in (
+        "not an r&d", "not r&d", "not a research project", "not a pilot", "not a prototype",
+        "capital equipment efficiency", "operational improvements", "equipment upgrade", "equipment replacement",
+    ))
     client_has_rd_intent = any(term in client_blob for term in client_rd_signals) and not client_explicit_non_rd
     if any(term in grant_blob for term in rd_signals) and not client_has_rd_intent:
         return False, "Opportunity requires an R&D/pilot project not identified in the submitted project."
 
-    # Education and small-business searches are especially vulnerable to broad R&D terms.
-    required = 2 if applicant_type in ("EDU_K12", "HIGHER_ED", "HIGHER_ED_PUBLIC", "HIGHER_ED_PRIVATE", "RESEARCH_INSTITUTION", "SMALL_BUSINESS", "FOR_PROFIT") else 1
-    if len(distinctive_overlap) < required:
-        return False, "Insufficient project-specific overlap after removing broad search terms."
-    return True, ""
+    if client_groups and grant_groups and client_groups.isdisjoint(grant_groups):
+        return False, "Program purpose does not match the submitted project's subject matter."
+
+    anchored_client_groups = client_groups & _ANCHOR_REQUIRED_GROUPS
+    if anchored_client_groups and not (anchored_client_groups & grant_groups):
+        return False, "Opportunity does not contain the project's required subject-matter anchor."
+    if anchored_client_groups and not overlap:
+        return False, "No project-specific topic anchor appears in the opportunity purpose."
+
+    shared_groups = client_groups & grant_groups
+    minimum_overlap = 1 if shared_groups & {"agriculture", "education_stem"} else 2
+    if len(overlap) < minimum_overlap:
+        return False, "Insufficient project-specific overlap in the opportunity purpose."
+
+
+    return True, "Program-purpose gate passed: " + ", ".join(sorted(overlap)[:6]) + "."
 
 
 def _purchaseable_fit(gr: Dict[str, Any]) -> bool:
@@ -837,7 +958,8 @@ def score_grant(
     fit_notes.append(f"Applicant category passed preliminary Grants.gov synopsis screening for {applicant_type}; all additional eligibility conditions still require verification in the official notice.")
 
     # 2) keyword overlap
-    tags = normalized_tags(gr.get("tags", []))
+    # Live Grants.gov tags include applicant-eligibility language; never score that as project relevance.
+    tags = [] if str(gr.get("source") or "").startswith("Grants.gov") else normalized_tags(gr.get("tags", []))
     summary_tokens = normalized_tags(_tokenize_text(gr.get("summary", "")))
     keyword_terms = set()
     for token in kws:
@@ -923,6 +1045,22 @@ def score_grant(
 def infer_client_sector(kws: List[str]) -> str:
     keyword_blob = " ".join(kws)
     sector_rules = [
+        (
+            "water / infrastructure",
+            ["drinking water", "wastewater", "sewer", "water main", "lead service", "stormwater", "water infrastructure"],
+        ),
+        (
+            "cybersecurity / technology",
+            ["cybersecurity", "cyber security", "ransomware", "information security", "network security"],
+        ),
+        (
+            "victim services / justice",
+            ["domestic violence", "sexual assault", "victim services", "legal advocacy", "human trafficking"],
+        ),
+        (
+            "food access / nutrition",
+            ["food insecurity", "food access", "mobile market", "food pantry", "food bank", "hunger", "nutrition assistance"],
+        ),
         (
             "agriculture / rural development",
             [
@@ -1180,7 +1318,11 @@ def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = Non
     category = payload.get("category") or payload.get("who") or ""
     amount = _safe_float(payload.get("amountRequested"))
     applicant_type = normalize_applicant_type(category)
-    kws = normalized_keywords(payload.get("keywords", ""))
+    project_context = ", ".join(filter(None, [
+        payload.get("projectTitle", ""), payload.get("keywords", ""), payload.get("need", ""),
+        payload.get("notes", ""), payload.get("audience", ""),
+    ]))
+    kws = normalized_keywords(project_context)
     requested_sector = infer_client_sector(kws)
     state_value = payload.get("state") or payload.get("eligible_state") or ""
 
@@ -1188,7 +1330,7 @@ def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = Non
     if pinned_grant:
         grants = [pinned_grant]
     elif live_grants_enabled:
-        live_query = " ".join(filter(None, [payload.get("projectTitle", ""), payload.get("keywords", "")])).strip()
+        live_query = ", ".join(filter(None, [payload.get("projectTitle", ""), payload.get("keywords", ""), payload.get("need", "")])).strip()
         grants = search_live_grants(live_query, applicant_type=applicant_type, sector=requested_sector) if live_query else []
         if not grants:
             return [], False
@@ -1226,7 +1368,7 @@ def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = Non
                 continue
 
             s = score_grant(gr, category, kws, amount)
-            purchasable = s["fit"] in ("Strong Match", "Possible Match")
+            purchasable = relevance_ok and s["fit"] in ("Strong Match", "Possible Match")
 
             url = grant_display_url(gr)
             built.append(
