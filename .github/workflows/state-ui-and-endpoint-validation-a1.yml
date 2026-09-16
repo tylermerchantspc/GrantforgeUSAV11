@@ -1,0 +1,129 @@
+name: State UI and endpoint validation A1
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - '.github/workflows/state-ui-and-endpoint-validation-a1.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: .
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      LIVE_GRANTS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/state-grants-a1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r backend/requirements.txt
+
+      - name: Make frontend state-aware without overstating coverage
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('frontend/grantforge-frontend/src/App.jsx')
+          s = p.read_text()
+
+          old = 'const FLAT_DRAFT_PRICE = "$49.99";\n'
+          new = '''const FLAT_DRAFT_PRICE = "$49.99";\nconst SUPPORTED_STATE_GRANTS = new Set(["CA", "IL", "IA"]);\n\nfunction sourceLabel(grant) {\n  if (String(grant?.level || "").toLowerCase() === "state") {\n    return grant?.state ? `Official ${grant.state} state source` : "Official state source";\n  }\n  return String(grant?.source || "").includes("Grants.gov") ? "Live Grants.gov" : "Verified federal data";\n}\n\nfunction officialLinkLabel(grant) {\n  return String(grant?.level || "").toLowerCase() === "state"\n    ? "View official state opportunity ↗"\n    : "View official Grants.gov opportunity ↗";\n}\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          replacements = {
+            '"Information is used to operate the requested service, match the intake against potential federal opportunities, prepare drafting materials, maintain transaction records, troubleshoot service issues, and protect the service from fraud or misuse. GrantForgeUSA does not sell applicant information."':
+            '"Information is used to operate the requested service, match the intake against potential federal opportunities and supported state-government opportunities, prepare drafting materials, maintain transaction records, troubleshoot service issues, and protect the service from fraud or misuse. GrantForgeUSA does not sell applicant information."',
+            '"GrantForgeUSA provides proprietary software-assisted federal opportunity matching, preliminary fit information, proposal previews, and paid proposal drafting materials. The service is independent and is not Grants.gov, a federal agency, or an authorized representative of the United States government."':
+            '"GrantForgeUSA provides proprietary software-assisted federal opportunity matching and supported state-government opportunity matching, preliminary fit information, proposal previews, and paid proposal drafting materials. The service is independent and is not Grants.gov, a federal or state agency, or an authorized representative of any government."',
+            '"Federal notices, agency instructions, Grants.gov requirements, amendments, deadlines, laws, and regulations control over any GrantForgeUSA summary or draft. Opportunities may change, close, be amended, or be withdrawn after matching."':
+            '"Federal or state funding notices, agency instructions, Grants.gov or applicable state-system requirements, amendments, deadlines, laws, and regulations control over any GrantForgeUSA summary or draft. Opportunities may change, close, be amended, or be withdrawn after matching."',
+            '"GrantForgeUSA, LLC is an independent private business. It is not affiliated with or endorsed by Grants.gov or the United States government."':
+            '"GrantForgeUSA, LLC is an independent private business. It is not affiliated with or endorsed by Grants.gov, the United States government, or any state government."',
+            '<small>Federal grant matching &amp; drafting</small>': '<small>Government grant matching &amp; drafting</small>',
+            'Proprietary software for federal grant opportunity matching, proposal previews, and editable draft preparation.': 'Proprietary software for federal and supported state-government grant matching, proposal previews, and editable draft preparation.',
+            'Independent service · Not affiliated with Grants.gov or the United States government.': 'Independent service · Not affiliated with Grants.gov, the United States government, or any state government.',
+            '<h3>{grant.title || "Federal funding opportunity"}</h3>': '<h3>{grant.title || "Government funding opportunity"}</h3>',
+            '<div><dt>Source</dt><dd>{String(grant.source || "").includes("Grants.gov") ? "Live Grants.gov" : "Verified federal data"}</dd></div>': '<div><dt>Source</dt><dd>{sourceLabel(grant)}</dd></div>',
+            'View official Grants.gov opportunity ↗': '{officialLinkLabel(grant)}',
+            'setNotice("No purchase-ready federal opportunity matched this intake. Try refining the project description, keywords, applicant type, state, or funding request.");': 'setNotice("No purchase-ready federal or supported-state opportunity matched this intake. Try refining the project description, keywords, applicant type, state, or funding request.");',
+            '<span className="eyebrow">Federal grant matching + proposal drafting</span>': '<span className="eyebrow">Federal + selected state grant matching</span>',
+            'Tell GrantForgeUSA about the eligible applicant and project. Our proprietary software screens federal opportunities, ranks the strongest matches, shows a preliminary qualification level, and gives you a proposal preview before you decide to purchase the full draft.': 'Tell GrantForgeUSA about the eligible applicant and project. Federal grant search covers all 50 states. In supported states, the same search also checks verified state-government opportunities. The software ranks only opportunities that pass preliminary screening and gives you a proposal preview before purchase.',
+            '<div><dt>2 · Match</dt><dd>Review ranked federal opportunities and High / Low / No fit.</dd></div>': '<div><dt>2 · Match</dt><dd>Review ranked federal and available supported-state opportunities with High / Low / No fit.</dd></div>',
+            '<div><strong>Official federal links</strong><span>Matches include a direct Grants.gov reference for independent verification.</span></div>': '<div><strong>Official government links</strong><span>Matches link to Grants.gov or the verified official state source for independent review.</span></div>',
+            '<h2>From project idea to a working federal proposal draft.</h2>': '<h2>From project idea to a working government grant proposal draft.</h2>',
+            'GrantForgeUSA screens available federal opportunities and ranks up to three candidates with fit notes and official links.': 'GrantForgeUSA screens available federal opportunities and, where supported, official state-government opportunities, then ranks up to three candidates with fit notes and official links.',
+            '<span>Federal opportunity search + preview</span>': '<span>Federal + supported-state opportunity search + preview</span>',
+            '{searching ? "Searching federal opportunities…" : "Find my grants"}': '{searching ? "Searching government opportunities…" : "Find my grants"}',
+          }
+          for old_text, new_text in replacements.items():
+              if old_text not in s:
+                  raise AssertionError(f'missing App.jsx replacement target: {old_text[:90]}')
+              s = s.replace(old_text, new_text, 1)
+
+          old = '''                    {[["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arkansas"],["CA","California"],["CO","Colorado"],["CT","Connecticut"],["DE","Delaware"],["FL","Florida"],["GA","Georgia"],["HI","Hawaii"],["ID","Idaho"],["IL","Illinois"],["IN","Indiana"],["IA","Iowa"],["KS","Kansas"],["KY","Kentucky"],["LA","Louisiana"],["ME","Maine"],["MD","Maryland"],["MA","Massachusetts"],["MI","Michigan"],["MN","Minnesota"],["MS","Mississippi"],["MO","Missouri"],["MT","Montana"],["NE","Nebraska"],["NV","Nevada"],["NH","New Hampshire"],["NJ","New Jersey"],["NM","New Mexico"],["NY","New York"],["NC","North Carolina"],["ND","North Dakota"],["OH","Ohio"],["OK","Oklahoma"],["OR","Oregon"],["PA","Pennsylvania"],["RI","Rhode Island"],["SC","South Carolina"],["SD","South Dakota"],["TN","Tennessee"],["TX","Texas"],["UT","Utah"],["VT","Vermont"],["VA","Virginia"],["WA","Washington"],["WV","West Virginia"],["WI","Wisconsin"],["WY","Wyoming"],["DC","District of Columbia"]].map(([code, name]) => <option key={code} value={code}>{name}</option>)}\n                  </select>\n'''
+          new = '''                    {[["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arkansas"],["CA","California"],["CO","Colorado"],["CT","Connecticut"],["DE","Delaware"],["FL","Florida"],["GA","Georgia"],["HI","Hawaii"],["ID","Idaho"],["IL","Illinois"],["IN","Indiana"],["IA","Iowa"],["KS","Kansas"],["KY","Kentucky"],["LA","Louisiana"],["ME","Maine"],["MD","Maryland"],["MA","Massachusetts"],["MI","Michigan"],["MN","Minnesota"],["MS","Mississippi"],["MO","Missouri"],["MT","Montana"],["NE","Nebraska"],["NV","Nevada"],["NH","New Hampshire"],["NJ","New Jersey"],["NM","New Mexico"],["NY","New York"],["NC","North Carolina"],["ND","North Dakota"],["OH","Ohio"],["OK","Oklahoma"],["OR","Oregon"],["PA","Pennsylvania"],["RI","Rhode Island"],["SC","South Carolina"],["SD","South Dakota"],["TN","Tennessee"],["TX","Texas"],["UT","Utah"],["VT","Vermont"],["VA","Virginia"],["WA","Washington"],["WV","West Virginia"],["WI","Wisconsin"],["WY","Wyoming"],["DC","District of Columbia"]].map(([code, name]) => <option key={code} value={code}>{SUPPORTED_STATE_GRANTS.has(code) ? `${name} — Federal + State` : name}</option>)}\n                  </select>\n                  <small className="field-guidance">Federal search covers every state. State-government search is currently added for California, Illinois, and Iowa; all other states are federal-only until their official state sources pass GrantForgeUSA verification.</small>\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          # Use either authoritative URL field without changing backend trust rules.
+          old = '''      {grant.program_url && (\n        <a className="official-link" href={grant.program_url} target="_blank" rel="noreferrer">\n          {officialLinkLabel(grant)}\n        </a>\n      )}\n'''
+          new = '''      {(grant.program_url || grant.official_url) && (\n        <a className="official-link" href={grant.program_url || grant.official_url} target="_blank" rel="noreferrer">\n          {officialLinkLabel(grant)}\n        </a>\n      )}\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          idx = Path('frontend/grantforge-frontend/index.html')
+          x = idx.read_text()
+          old = 'content="GrantForgeUSA helps organizations match with federal grant opportunities, review preliminary fit, preview proposal work, and purchase a full proposal draft for a selected opportunity."'
+          new = 'content="GrantForgeUSA helps organizations match with federal and supported state-government grant opportunities, review preliminary fit, preview proposal work, and purchase a full proposal draft for a selected opportunity."'
+          assert old in x
+          idx.write_text(x.replace(old, new, 1))
+          PY
+
+      - name: Run endpoint and backend regressions
+        run: |
+          pytest -q backend/tests/test_state_endpoints.py backend/tests/test_state_server_integration.py backend/tests/test_state_grants_live.py
+          pytest -q backend/tests
+
+      - name: Run frontend lint integration and build
+        working-directory: frontend/grantforge-frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run test:integration
+          npm run build
+
+      - name: Static state-copy assertions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('frontend/grantforge-frontend/src/App.jsx').read_text()
+          assert 'California, Illinois, and Iowa' in s
+          assert 'Federal search covers every state' in s
+          assert 'Official ${grant.state} state source' in s
+          assert 'View official state opportunity' in s
+          assert 'Searching government opportunities' in s
+          assert 'No purchase-ready federal opportunity matched this intake' not in s
+          PY
+
+      - name: Commit only after all checks pass
+        run: |
+          git config user.name "GrantForgeUSA QA"
+          git config user.email "actions@users.noreply.github.com"
+          git add frontend/grantforge-frontend/src/App.jsx frontend/grantforge-frontend/index.html
+          git commit -m "Show verified state grant coverage in customer UI"
+          git push origin HEAD:feature/state-grants-a1
