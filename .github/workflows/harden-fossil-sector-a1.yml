@@ -1,0 +1,56 @@
+name: Harden fossil sector A1
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - '.github/workflows/harden-fossil-sector-a1.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      LIVE_GRANTS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/state-grants-a1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements.txt
+      - name: Require explicit fossil-sector project context
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('backend/v11_server.py')
+          s = p.read_text()
+          old = '''    if ("oil" in grant_terms or ("natural" in grant_terms and "gas" in grant_terms)) and not any(x in client_blob for x in ("oil", "natural gas", "petroleum")):\n        return False, "Opportunity is focused on oil/gas rather than the submitted project."\n'''
+          new = '''    grant_is_fossil_sector = (\n        "oil" in grant_terms\n        or "petroleum" in grant_terms\n        or "pipeline" in grant_terms\n        or ("natural" in grant_terms and "gas" in grant_terms)\n    )\n    client_is_fossil_sector = (\n        "oil" in client_terms\n        or "petroleum" in client_terms\n        or "pipeline" in client_terms\n        or ("natural" in client_terms and "gas" in client_terms)\n    )\n    if grant_is_fossil_sector and not client_is_fossil_sector:\n        return False, "Opportunity is specifically focused on the oil/natural-gas sector rather than the submitted project."\n'''
+          assert old in s
+          p.write_text(s.replace(old, new, 1))
+
+          t = Path('backend/tests/test_state_server_integration.py')
+          tests = t.read_text()
+          tests += '''\n\ndef test_generic_energy_rd_does_not_match_oil_gas_sector_grant():\n    payload = {\n        "projectTitle":"Industrial Energy Efficiency Technology Demonstration",\n        "keywords":"energy efficiency, manufacturing, technology demonstration, research and development",\n        "need":"Demonstrate and validate energy-saving technology for commercial and industrial users.",\n        "notes":"Small business energy technology project.",\n        "audience":"Manufacturers",\n    }\n    grant = {\n        "title":"Advancing Oil and Natural Gas Production and Delivery",\n        "summary":"Advance cost-effective technologies for the United States oil and natural gas supply chain, including production, delivery, infrastructure, and digital transformation.",\n        "sector_labels":["Energy","Research and Development"],\n        "tags":["oil","natural gas","energy","technology"],\n    }\n    ok, note = srv._relevance_compatible(grant, payload, "SMALL_BUSINESS")\n    assert ok is False\n    assert "oil/natural-gas sector" in note\n\ndef test_explicit_oil_gas_rd_can_pass_fossil_sector_guard():\n    payload = {\n        "projectTitle":"Natural Gas Pipeline Efficiency Technology Demonstration",\n        "keywords":"natural gas, pipeline, energy efficiency, technology demonstration, research and development",\n        "need":"Demonstrate technology that improves natural gas pipeline delivery efficiency and reliability.",\n        "notes":"Small business R&D for the natural gas supply chain.",\n        "audience":"Natural gas pipeline operators",\n    }\n    grant = {\n        "title":"Advancing Oil and Natural Gas Production and Delivery",\n        "summary":"Advance cost-effective technologies for improving efficiency and reliability of the oil and natural gas supply chain and pipeline infrastructure.",\n        "sector_labels":["Energy","Research and Development"],\n        "tags":["oil","natural gas","pipeline","energy","technology"],\n    }\n    ok, note = srv._relevance_compatible(grant, payload, "SMALL_BUSINESS")\n    assert ok is True, note\n'''
+          t.write_text(tests)
+          PY
+      - name: Run targeted and full regressions
+        run: |
+          pytest -q backend/tests/test_state_server_integration.py backend/tests/test_state_grants_live.py
+          pytest -q backend/tests
+      - name: Commit only if green
+        run: |
+          git config user.name "GrantForgeUSA QA"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/v11_server.py backend/tests/test_state_server_integration.py
+          git commit -m "Require explicit fossil-sector project context"
+          git push origin HEAD:feature/state-grants-a1
