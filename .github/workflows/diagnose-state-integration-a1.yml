@@ -1,0 +1,83 @@
+name: Diagnose state integration A1
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - '.github/workflows/diagnose-state-integration-a1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      LIVE_GRANTS_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements.txt
+      - name: Apply integration patch from workflow without committing
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/integrate-state-grants-a1.yml').read_text()
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY\n\n      - name: Add integration tests"
+          start = text.index(start_marker) + len(start_marker)
+          end = text.index(end_marker, start)
+          lines = text[start:end].splitlines()
+          body = "\n".join(line[10:] if line.startswith("          ") else line for line in lines)
+          Path('/tmp/apply_state_server.py').write_text(body)
+          PY
+          python /tmp/apply_state_server.py
+      - name: Print gate diagnostics
+        run: |
+          python - <<'PY'
+          from backend import v11_server as srv
+
+          p = {
+              'organization':'Test Applicant','category':'City / County / Local Government','state':'CA',
+              'annualBudget':5000000,'projectTitle':'Drinking Water Main Replacement',
+              'amountRequested':250000,'timeline':'18 months','audience':'Residents',
+              'keywords':'drinking water, water infrastructure, lead service',
+              'need':'Replace aging drinking water mains and lead service lines.',
+              'notes':'Local government public water infrastructure project.'
+          }
+          g = {
+              'title':'Federal Drinking Water Infrastructure Grant','program':'Federal Water Program',
+              'official_url':'https://www.grants.gov/opportunity/details/999999','program_url':'https://www.grants.gov/opportunity/details/999999',
+              'opp_id':'999999','opportunity_id':'999999','opp_number':'FED-WATER',
+              'deadline':'2026-12-20','close_date':'2026-12-20','min_amount':0,'max_amount':500000,
+              'eligibility_text':'City or township governments and county governments are eligible.',
+              'eligible_types':['local government'],'eligibility_codes':['02','04'],
+              'summary':'Funds drinking water infrastructure, water mains, and lead service line replacement.',
+              'sector_labels':['water infrastructure'],'sector':'water / infrastructure',
+              'tags':['drinking water','water infrastructure','lead service'],
+              'source':'Grants.gov live data','level':'Federal','cost_sharing_required':False,'requires_match_percent':0,
+          }
+          app = srv.normalize_applicant_type(p['category'])
+          kws = srv.normalized_keywords(', '.join([p['projectTitle'],p['keywords'],p['need'],p['notes'],p['audience']]))
+          print('APPLICANT_TYPE', app)
+          print('KWS', kws)
+          print('STUDENT', srv._student_applicant_opportunity(g))
+          print('ACTIONABLE', srv._is_actionable_opportunity(g))
+          print('EXPIRED', srv._is_expired(g['deadline']))
+          print('ELIGIBLE', srv._is_eligible_for_applicant(g, app))
+          print('GEOGRAPHY', srv._geography_compatible(g,p['state']))
+          print('FUNDING', srv._funding_range_compatible(g,p['amountRequested']))
+          print('RELEVANCE', srv._relevance_compatible(g,p,app))
+          print('SCORE', srv.score_grant(g,p['category'],kws,p['amountRequested']))
+          print('URL', srv.grant_display_url(g))
+          srv.search_live_grants=lambda *a, **k:[g]
+          srv.search_state_grants=lambda *a, **k:[]
+          print('SHORTLIST', srv.shortlist(p))
+          PY
