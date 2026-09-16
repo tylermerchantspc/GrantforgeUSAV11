@@ -1,0 +1,76 @@
+name: Probe state grant sources A1
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - '.github/workflows/state-source-probe-a1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe California Illinois Iowa official sources
+        run: |
+          python - <<'PY'
+          import json, re
+          from html import unescape
+          from urllib.parse import urljoin
+          from urllib.request import Request, urlopen
+
+          UA = 'GrantForgeUSA-StateSourceProbe/1.0 (+https://grantforgeusa.com)'
+
+          def get(url, timeout=20):
+              req = Request(url, headers={'User-Agent': UA, 'Accept': 'text/html,application/json,*/*'})
+              with urlopen(req, timeout=timeout) as r:
+                  return r.status, r.headers.get('Content-Type',''), r.read().decode('utf-8', errors='replace')
+
+          # California: official CKAN datastore API documented by the Grants Portal/Open Data site.
+          ca = 'https://data.ca.gov/api/3/action/datastore_search?resource_id=111c8c88-21f6-453c-ae2c-b4785a0624f5&limit=2'
+          ca_status, ca_ct, ca_body = get(ca)
+          ca_json = json.loads(ca_body)
+          ca_fields = [f.get('id') for f in ((ca_json.get('result') or {}).get('fields') or [])]
+          ca_records = (ca_json.get('result') or {}).get('records') or []
+          print('CA_STATUS', ca_status, ca_ct)
+          print('CA_FIELDS', ca_fields)
+          print('CA_RECORD_COUNT', len(ca_records))
+          if ca_records:
+              print('CA_SAMPLE_KEYS', sorted(ca_records[0].keys()))
+              print('CA_SAMPLE', json.dumps(ca_records[0], default=str)[:3000])
+          assert ca_status == 200 and ca_json.get('success') is True and ca_records, 'California CKAN source unavailable'
+
+          # Illinois: authoritative statewide CSFA current funding opportunities table.
+          il = 'https://omb.illinois.gov/public/gata/csfa/OpportunityList.aspx'
+          il_status, il_ct, il_body = get(il)
+          il_links = re.findall(r'href=[\"\']([^\"\']*Opportunity\.aspx\?nofo=\d+[^\"\']*)', il_body, flags=re.I)
+          print('IL_STATUS', il_status, il_ct, 'OPPORTUNITY_LINKS', len(il_links))
+          print('IL_SAMPLE_LINKS', il_links[:5])
+          assert il_status == 200 and il_links, 'Illinois opportunity list unavailable or unparseable'
+          il_detail_url = urljoin(il, unescape(il_links[0]))
+          il_d_status, _, il_detail = get(il_detail_url)
+          print('IL_DETAIL_STATUS', il_d_status, il_detail_url)
+          print('IL_DETAIL_HAS_INSTRUMENT', 'Type of Assistance Instrument' in il_detail)
+          print('IL_DETAIL_HAS_PROGRAM_LINK', 'Program.aspx?csfa=' in il_detail)
+          assert il_d_status == 200 and 'Type of Assistance Instrument' in il_detail, 'Illinois detail schema changed'
+
+          # Iowa: public current opportunity storefront.
+          ia = 'https://www.iowagrants.gov/storefrontFOList.do'
+          ia_status, ia_ct, ia_body = get(ia)
+          ia_links = re.findall(r'href=[\"\']([^\"\']*viewStorefrontOpportunity\.do\?[^\"\']+)', ia_body, flags=re.I)
+          print('IA_STATUS', ia_status, ia_ct, 'OPPORTUNITY_LINKS', len(ia_links))
+          print('IA_SAMPLE_LINKS', ia_links[:5])
+          assert ia_status == 200 and ia_links, 'Iowa opportunity list unavailable or unparseable'
+          ia_detail_url = urljoin(ia, unescape(ia_links[0]))
+          ia_d_status, _, ia_detail = get(ia_detail_url)
+          plain = re.sub(r'<[^>]+>', ' ', ia_detail)
+          plain = re.sub(r'\s+', ' ', unescape(plain))
+          print('IA_DETAIL_STATUS', ia_d_status, ia_detail_url)
+          print('IA_DETAIL_HAS_ELIGIBILITY', 'Eligibility' in plain)
+          print('IA_DETAIL_SNIPPET', plain[:3000])
+          assert ia_d_status == 200 and 'Eligibility' in plain, 'Iowa detail schema changed'
+          PY
