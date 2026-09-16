@@ -32,21 +32,44 @@ jobs:
         run: |
           pytest -q backend/tests/test_state_grants_live.py
           pytest -q backend/tests
-      - name: Live smoke test supported state sources
+      - name: Live smoke and adversarial source checks
         env:
           LIVE_GRANTS_ENABLED: 'true'
         run: |
           python - <<'PY'
-          from backend.state_grants_live import search_state_grants
+          import re
+          from backend.state_grants_live import search_state_grants, fetch_state_grant
           probes = {
               'CA': 'water infrastructure community',
               'IL': 'education community services',
               'IA': 'energy community development',
           }
+          collected = {}
           for state, query in probes.items():
               rows = search_state_grants(state, query)
+              collected[state] = rows
               print(state, 'RESULTS', len(rows))
-              for row in rows[:3]:
+              for row in rows[:5]:
                   print(state, row.get('title'), row.get('deadline'), row.get('official_url'))
               assert isinstance(rows, list)
+              for row in rows:
+                  assert row.get('title')
+                  assert row.get('official_url', '').startswith('https://')
+                  assert row.get('level') == 'State'
+                  assert row.get('state') == state
+
+          # Loan-only records must never enter the state grant candidate set.
+          for row in collected['IA']:
+              title = (row.get('title') or '').lower()
+              assert not (re.search(r'\bloans?\b', title) and not re.search(r'\bgrants?\b', title)), title
+
+          # Re-fetch one live record from each state by normalized ID. This is the
+          # server-side behavior preview/checkout will use instead of trusting browser data.
+          for state, rows in collected.items():
+              if not rows:
+                  continue
+              selected = rows[0]
+              live = fetch_state_grant(state, selected['opp_id'], refresh=True)
+              assert live and live.get('opp_id') == selected.get('opp_id')
+              print(state, 'REFETCH_OK', live.get('opp_id'), live.get('title'))
           PY
