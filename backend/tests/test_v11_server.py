@@ -116,7 +116,11 @@ def _purchase_ready_grant(payload):
 
 def _mock_purchase_ready_shortlist(monkeypatch, payload):
     grant = _purchase_ready_grant(payload)
-    monkeypatch.setattr(srv, "shortlist", lambda data: ([dict(grant)], True))
+    grant["source"] = "Grants.gov live data"
+    grant["opp_id"] = "TEST-2027-001"
+    grant["opportunity_id"] = "TEST-2027-001"
+    monkeypatch.setattr(srv, "shortlist", lambda data, pinned_grant=None: ([dict(pinned_grant or grant)], True))
+    monkeypatch.setattr(srv, "fetch_live_grant", lambda identifier: dict(grant) if str(identifier) == "TEST-2027-001" else {})
     return grant
 
 

@@ -20,6 +20,12 @@ if ROOT_DIR and ROOT_DIR not in sys.path:
 
 from runtime_config import load_runtime_settings
 from backend.grantsgov_live import fetch_live_grant, search_live_grants
+from backend.state_grants_live import (
+    SUPPORTED_STATE_CODES,
+    fetch_state_grant,
+    is_official_state_url,
+    search_state_grants,
+)
 
 # PDF / data helpers
 from reportlab.lib.pagesizes import letter
@@ -276,6 +282,9 @@ def sanitize_payload(data: Dict[str, Any]) -> Dict[str, Any]:
                 "opp_id": _sanitize_text(v.get("opp_id", ""), 120),
                 "opportunity_id": _sanitize_text(v.get("opportunity_id", ""), 120),
                 "source": _sanitize_text(v.get("source", ""), 120),
+                "level": _sanitize_text(v.get("level", ""), 40),
+                "state": _sanitize_text(v.get("state", ""), 10),
+                "funding_origin": _sanitize_text(v.get("funding_origin", ""), 80),
             }
         elif k == "recommendations" and isinstance(v, list):
             out[k] = [
@@ -616,7 +625,16 @@ def _ensure_http_url(url: str) -> Optional[str]:
 
 
 def grant_display_url(gr: Dict[str, Any]) -> str:
-    """Return a validated official Grants.gov URL with direct-link priority."""
+    """Return a validated official government URL without weakening federal URL rules."""
+    level = str(gr.get("level") or "").strip().lower()
+    state = _normalize_state(str(gr.get("state") or ""))
+    if level == "state":
+        for key in ("official_url", "program_url", "url", "funding_url"):
+            candidate = str(gr.get(key) or "").strip()
+            if state and is_official_state_url(state, candidate):
+                return candidate
+        return ""
+
     for key in ("official_url", "program_url", "url", "funding_url"):
         candidate = _ensure_http_url(gr.get(key) or "")
         if candidate:
@@ -822,7 +840,7 @@ _PURPOSE_GROUPS = {
     "obesity": ("obesity", "anti-obesity", "weight management"),
     "cancer": ("cancer", "glioblastoma", "oncology", "tumor"),
     "neurology": ("brain", "neurolog", "neuroscience"),
-    "aging": ("aging", "geriatric", "alzheimer", "older adults"),
+    "aging": ("aging research", "biology of aging", "age-related disease", "geriatric", "alzheimer"),
     "flood_mitigation": ("flood", "stormwater", "storm water", "drainage", "hazard mitigation"),
     "apprenticeship": ("apprenticeship", "apprentice", "registered apprenticeship"),
     "food_sovereignty": ("food sovereignty", "tribal food sovereignty", "indigenous food sovereignty"),
@@ -1027,6 +1045,47 @@ def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant
     return True, "Program-purpose gate passed: " + ", ".join(sorted(overlap)[:6]) + "."
 
 
+def _state_verification_complete(gr: Dict[str, Any], applicant_state: str) -> Tuple[bool, str]:
+    """Require enough authoritative state data before a state result can be sold."""
+    if str(gr.get("level") or "").strip().lower() != "state":
+        return True, ""
+    record_state = _normalize_state(str(gr.get("state") or ""))
+    intake_state = _normalize_state(applicant_state)
+    if not record_state or record_state != intake_state:
+        return False, "State opportunity does not match the applicant state."
+    if record_state not in SUPPORTED_STATE_CODES:
+        return False, "State opportunity source is not enabled for GrantForgeUSA paid screening."
+    if not str(gr.get("title") or "").strip():
+        return False, "State opportunity title is missing."
+    if not str(gr.get("eligibility_text") or "").strip():
+        return False, "State applicant eligibility could not be verified from the official opportunity."
+    if not str(gr.get("deadline") or gr.get("close_date") or "").strip():
+        return False, "State application deadline could not be verified from the official opportunity."
+    if _safe_float(gr.get("max_amount"), 0) <= 0:
+        return False, "State award ceiling could not be verified from the official opportunity."
+    if not grant_display_url(gr):
+        return False, "State opportunity does not have an allowlisted official government source URL."
+    return True, "State opportunity verification gate passed."
+
+
+def _verified_requested_grant(requested_grant: Dict[str, Any], applicant_state: str) -> Dict[str, Any]:
+    """Re-fetch a selected opportunity from its authoritative source before preview/payment."""
+    requested = dict(requested_grant or {})
+    requested_id = _first_identifier(requested, "opp_id", "opportunity_id", "opp_number", "opportunity_number")
+    if not requested_id:
+        return {}
+    level = str(requested.get("level") or "").strip().lower()
+    source = str(requested.get("source") or "")
+    if level == "state":
+        state = _normalize_state(str(requested.get("state") or applicant_state or ""))
+        if state not in SUPPORTED_STATE_CODES or state != _normalize_state(applicant_state):
+            return {}
+        return fetch_state_grant(state, requested_id, refresh=True)
+    if "Grants.gov" in source:
+        return fetch_live_grant(requested_id)
+    return {}
+
+
 def _purchaseable_fit(gr: Dict[str, Any]) -> bool:
     return gr.get("fit") in ("Strong Match", "Possible Match") and bool(gr.get("purchasable"))
 
@@ -1048,7 +1107,10 @@ def score_grant(
 
     # 1) eligibility (already gated, but weighted highest)
     score += 100
-    fit_notes.append(f"Applicant category passed preliminary Grants.gov synopsis screening for {applicant_type}; all additional eligibility conditions still require verification in the official notice.")
+    if str(gr.get("level") or "").strip().lower() == "state":
+        fit_notes.append(f"Applicant category passed preliminary official state opportunity screening for {applicant_type}; all additional eligibility conditions still require verification in the official notice.")
+    else:
+        fit_notes.append(f"Applicant category passed preliminary Grants.gov synopsis screening for {applicant_type}; all additional eligibility conditions still require verification in the official notice.")
 
     # 2) keyword overlap
     # Live Grants.gov tags include applicant-eligibility language; never score that as project relevance.
@@ -1424,7 +1486,14 @@ def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = Non
         grants = [pinned_grant]
     elif live_grants_enabled:
         live_query = ", ".join(filter(None, [payload.get("projectTitle", ""), payload.get("keywords", ""), payload.get("need", "")])).strip()
-        grants = search_live_grants(live_query, applicant_type=applicant_type, sector=requested_sector) if live_query else []
+        federal_grants = search_live_grants(live_query, applicant_type=applicant_type, sector=requested_sector) if live_query else []
+        state_code = _normalize_state(str(state_value))
+        state_grants = (
+            search_state_grants(state_code, live_query, applicant_type=applicant_type, sector=requested_sector)
+            if live_query and state_code in SUPPORTED_STATE_CODES
+            else []
+        )
+        grants = list(federal_grants or []) + list(state_grants or [])
         if not grants:
             return [], False
     else:
@@ -1454,10 +1523,11 @@ def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = Non
             if eligibility_required and not _is_eligible_for_applicant(gr, applicant_type):
                 continue
 
+            state_verified, state_note = _state_verification_complete(gr, str(state_value))
             geography_ok, geography_note = _geography_compatible(gr, state_value)
             funding_ok, funding_note = _funding_range_compatible(gr, amount)
             relevance_ok, relevance_note = _relevance_compatible(gr, payload, applicant_type)
-            if not geography_ok or not funding_ok or not relevance_ok:
+            if not state_verified or not geography_ok or not funding_ok or not relevance_ok:
                 continue
 
             s = score_grant(gr, category, kws, amount)
@@ -1484,7 +1554,7 @@ def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = Non
                     "score": s["score"],
                     "fit_notes": s["fit_notes"],
                     "purchasable": purchasable,
-                    "screening_notes": " ".join(n for n in (geography_note, funding_note, relevance_note) if n),
+                    "screening_notes": " ".join(n for n in (state_note, geography_note, funding_note, relevance_note) if n),
                     "min_amount": _safe_float(gr.get("min_amount"), 0),
                     "requires_match_percent": gr.get("requires_match_percent", 0),
                     "cost_sharing_required": gr.get("cost_sharing_required"),
@@ -1493,7 +1563,10 @@ def shortlist(payload: Dict[str, Any], pinned_grant: Dict[str, Any] | None = Non
                     "sector": gr.get("sector", ""),
                     "summary": gr.get("summary", ""),
                     "source": gr.get("source", "GrantForgeUSA verified fallback dataset"),
-                    "level": "Federal",
+                    "level": gr.get("level") or "Federal",
+                    "state": gr.get("state", ""),
+                    "funding_origin": gr.get("funding_origin", "Federal" if not gr.get("level") else ""),
+                    "eligibility_text": gr.get("eligibility_text", ""),
                 }
             )
         return built
@@ -1643,8 +1716,12 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     annual_budget = _safe_float(intake.get("annualBudget"), 0)
     kws = normalized_keywords((intake.get("keywords") or "").strip())
     sector = infer_client_sector(kws) or "the proposed project area"
-    g_title = _sanitize_text(grant.get("title") or "Federal funding opportunity", 240)
-    g_program = _sanitize_text(grant.get("program") or grant.get("agency") or "Federal program", 240)
+    is_state_grant = str(grant.get("level") or "").strip().lower() == "state"
+    opportunity_label = "state funding opportunity" if is_state_grant else "Federal funding opportunity"
+    program_label = "State program" if is_state_grant else "Federal program"
+    source_label = "official state opportunity" if is_state_grant else "Grants.gov synopsis"
+    g_title = _sanitize_text(grant.get("title") or opportunity_label, 240)
+    g_program = _sanitize_text(grant.get("program") or grant.get("agency") or program_label, 240)
     g_deadline = _sanitize_text(grant.get("deadline") or "TBA", 80)
     g_min = _safe_float(grant.get("min_amount"), 0)
     g_max = _safe_float(grant.get("max_amount"), 0)
@@ -1682,12 +1759,12 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
     if g_match > 0:
         match_text = f" A {g_match}% match is listed and must be verified against the official notice."
     elif g_cost_share is True:
-        match_text = " The Grants.gov synopsis indicates cost sharing or matching is required; the amount, basis, and any waiver must be verified in the official notice."
+        match_text = f" The {source_label} indicates cost sharing or matching is required; the amount, basis, and any waiver must be verified in the official notice."
     elif g_cost_share is False:
-        match_text = " The Grants.gov synopsis indicates cost sharing or matching is not required; verify the current official notice before submission."
+        match_text = f" The {source_label} indicates cost sharing or matching is not required; verify the current official notice before submission."
     else:
         match_text = " Cost-sharing requirements were not conclusively captured from the synopsis and must be verified in the official notice."
-    synopsis_text = f" The current Grants.gov synopsis states: {g_summary}" if g_summary else ""
+    synopsis_text = f" The current {source_label} states: {g_summary}" if g_summary else ""
     activity_language = {
         "energy / manufacturing efficiency": "procurement or installation planning, operational implementation, performance measurement, and documented efficiency results",
         "telehealth / healthcare": "service design, implementation protocols, access measures, quality monitoring, and documented health-service outcomes",
@@ -1700,7 +1777,7 @@ def build_narrative(intake: Dict[str, Any], grant: Dict[str, Any]) -> str:
         "entrepreneurship / innovation": "research or development activity, validation milestones, technical progress, and commercialization or adoption measures",
     }.get(sector, "defined project activities, documented milestones, responsible implementation, and measurable outcomes")
     sections = [
-        "Executive Summary\n" + f"{org}, a {entity_label}, seeks {req_str} through {g_title} to carry out '{project}' over {timeline}. The project is intended to serve {audience}. Based on the information supplied by the applicant, the proposed work centers on {focus} and falls within {sector}. This draft frames the project around the selected federal opportunity while preserving applicant responsibility for every factual statement, target, attachment, certification, and final submission decision.",
+        "Executive Summary\n" + f"{org}, a {entity_label}, seeks {req_str} through {g_title} to carry out '{project}' over {timeline}. The project is intended to serve {audience}. Based on the information supplied by the applicant, the proposed work centers on {focus} and falls within {sector}. This draft frames the project around the selected government grant opportunity while preserving applicant responsibility for every factual statement, target, attachment, certification, and final submission decision.",
         "Funding Opportunity Alignment\n" + f"Selected opportunity: {g_title}. Program/agency reference: {g_program}. Current deadline captured by GrantForgeUSA: {g_deadline}. Funding information captured from the opportunity: {range_text}. The requested amount is {req_str}.{match_text}{synopsis_text} Before submission, the applicant must compare this draft with the complete current notice, amendments, eligibility rules, required registrations, and application package.",
         "Statement of Need\n" + f"The applicant described the underlying need as follows: {need_text} The proposal should support this statement with applicant-verified local data, baseline information, documented demand, prior results, citations, or other evidence required by the funding notice. GrantForgeUSA does not invent those facts when they are not supplied in the intake.",
         "Program Description\n" + f"'{project}' will use {delivery_frame} focused on {activity_language}. The working scope is designed around {audience} and the applicant's stated priorities: {focus}. Final activities, quantities, locations, staffing assignments, partners, procurement specifications, and methods should be confirmed by {org} before submission and revised wherever the official notice requires a different structure.",
@@ -1835,9 +1912,9 @@ def questionnaire():
     results, has_strong_matches = shortlist(data)
     notice = ""
     if results and not has_strong_matches:
-        notice = "Potential federal matches found. Review the fit notes and official notice carefully before purchasing."
+        notice = "Potential government grant matches found. Review the fit notes and official notice carefully before purchasing."
     elif not results:
-        notice = "No purchase-ready federal opportunity matched the information provided. Refine the project details, funding request, or search terms and try again."
+        notice = "No purchase-ready federal or supported-state opportunity matched the information provided. Refine the project details, funding request, or search terms and try again."
     return jsonify(ok=True, organization=org, results=results, notice=notice)
 
 
@@ -1859,13 +1936,13 @@ def preview():
         return jsonify(ok=False, error=missing_err), 400
 
     requested_grant = data.get("grant") or {}
-    pinned = {}
-    requested_id = _first_identifier(requested_grant, "opp_id", "opportunity_id")
-    if requested_id and "Grants.gov" in str(requested_grant.get("source") or ""):
-        pinned = fetch_live_grant(requested_id)
+    applicant_state = str(data.get("state") or data.get("eligible_state") or "")
+    pinned = _verified_requested_grant(requested_grant, applicant_state) if requested_grant else {}
+    if requested_grant and not pinned:
+        return jsonify(ok=False, error="Selected opportunity could not be re-verified from its authoritative government source."), 422
     short, _ = shortlist(data, pinned_grant=pinned) if pinned else shortlist(data)
     if not short:
-        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422
+        return jsonify(ok=False, error="No purchase-ready government grant opportunity matches this intake."), 422
     grant = short[0]
     if requested_grant:
         requested_key = _grant_key(requested_grant)
@@ -1907,13 +1984,13 @@ def create_checkout_session():
     if not chk["ok"]:
         return jsonify(ok=False, error=chk["msg"]), 400
 
-    pinned = {}
-    requested_id = _first_identifier(requested_grant, "opp_id", "opportunity_id")
-    if requested_id and "Grants.gov" in str(requested_grant.get("source") or ""):
-        pinned = fetch_live_grant(requested_id)
+    applicant_state = str(data.get("state") or data.get("eligible_state") or "")
+    pinned = _verified_requested_grant(requested_grant, applicant_state) if requested_grant else {}
+    if requested_grant and not pinned:
+        return jsonify(ok=False, error="Selected opportunity could not be re-verified from its authoritative government source."), 422
     short, _ = shortlist(data, pinned_grant=pinned) if pinned else shortlist(data)
     if not short:
-        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422
+        return jsonify(ok=False, error="No purchase-ready government grant opportunity matches this intake."), 422
     requested_key = _grant_key(requested_grant)
     grant = next((item for item in short if _grant_key(item) == requested_key), {})
     if not grant or not _purchaseable_fit(grant):
@@ -1957,6 +2034,9 @@ def create_checkout_session():
         "projectTitle": (data.get("projectTitle") or "").strip(),
         "keywords": (data.get("keywords") or "").strip(),
         "state": (data.get("state") or data.get("eligible_state") or "").strip(),
+        "grant_level": grant.get("level", "Federal"),
+        "grant_state": grant.get("state", ""),
+        "grant_opp_id": grant.get("opp_id", ""),
         "price": f"{price:.2f}",
         "refund_policy": "Final once customized generation begins; exceptions required by law or nondelivery.",
         "requester_ip": _client_ip(),
