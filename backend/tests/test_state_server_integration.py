@@ -136,3 +136,56 @@ def test_generic_resident_through_words_do_not_create_program_purpose_match():
     }
     ok, note = srv._relevance_compatible(grant, payload, "NONPROFIT")
     assert ok is False
+
+
+def test_generic_energy_rd_does_not_match_oil_gas_sector_grant():
+    payload = {
+        "projectTitle":"Industrial Energy Efficiency Technology Demonstration",
+        "keywords":"energy efficiency, manufacturing, technology demonstration, research and development",
+        "need":"Demonstrate and validate energy-saving technology for commercial and industrial users.",
+        "notes":"Small business energy technology project.",
+        "audience":"Manufacturers",
+    }
+    grant = {
+        "title":"Advancing Oil and Natural Gas Production and Delivery",
+        "summary":"Advance cost-effective technologies for the United States oil and natural gas supply chain, including production, delivery, infrastructure, and digital transformation.",
+        "sector_labels":["Energy","Research and Development"],
+        "tags":["oil","natural gas","energy","technology"],
+    }
+    ok, note = srv._relevance_compatible(grant, payload, "SMALL_BUSINESS")
+    assert ok is False
+    assert "oil/natural-gas sector" in note
+
+def test_explicit_oil_gas_rd_can_pass_fossil_sector_guard():
+    payload = {
+        "projectTitle":"Natural Gas Pipeline Efficiency Technology Demonstration",
+        "keywords":"natural gas, pipeline, energy efficiency, technology demonstration, research and development",
+        "need":"Demonstrate technology that improves natural gas pipeline delivery efficiency and reliability.",
+        "notes":"Small business R&D for the natural gas supply chain.",
+        "audience":"Natural gas pipeline operators",
+    }
+    grant = {
+        "title":"Advancing Oil and Natural Gas Production and Delivery",
+        "summary":"Advance cost-effective technologies for improving efficiency and reliability of the oil and natural gas supply chain and pipeline infrastructure.",
+        "sector_labels":["Energy","Research and Development"],
+        "tags":["oil","natural gas","pipeline","energy","technology"],
+    }
+    ok, note = srv._relevance_compatible(grant, payload, "SMALL_BUSINESS")
+    assert ok is True, note
+
+def test_soil_text_does_not_trigger_oil_sector_guard():
+    payload = {
+        "projectTitle":"Soil Sensor Energy-Efficient Farm Monitoring",
+        "keywords":"soil sensor, agriculture, energy efficiency",
+        "need":"Improve soil monitoring with low-energy sensors.",
+        "notes":"Agricultural technology project.",
+        "audience":"Farmers",
+    }
+    grant = {
+        "title":"Agricultural Soil Sensor Technology",
+        "summary":"Develop soil sensor technology for farms and energy-efficient monitoring.",
+        "sector_labels":["Agriculture"],
+        "tags":["soil","sensor","agriculture"],
+    }
+    ok, note = srv._relevance_compatible(grant, payload, "SMALL_BUSINESS")
+    assert "oil/natural-gas sector" not in note

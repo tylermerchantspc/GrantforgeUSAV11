@@ -973,8 +973,14 @@ def _relevance_compatible(gr: Dict[str, Any], payload: Dict[str, Any], applicant
     client_terms = _purpose_tokens(client_blob)
     if (conflict_terms & grant_terms) and not (conflict_terms & client_terms):
         return False, "Opportunity subject matter conflicts with the submitted project."
-    if ("oil" in grant_terms or ("natural" in grant_terms and "gas" in grant_terms)) and not any(x in client_blob for x in ("oil", "natural gas", "petroleum")):
-        return False, "Opportunity is focused on oil/gas rather than the submitted project."
+    fossil_pattern = re.compile(
+        r"\b(?:oil|petroleum|natural\s+gas|oil\s+and\s+gas|oil\s*&\s*gas|pipeline|oilfield|gasfield)\b",
+        flags=re.I,
+    )
+    grant_is_fossil_sector = bool(fossil_pattern.search(grant_blob))
+    client_is_fossil_sector = bool(fossil_pattern.search(client_blob))
+    if grant_is_fossil_sector and not client_is_fossil_sector:
+        return False, "Opportunity is specifically focused on the oil/natural-gas sector rather than the submitted project."
 
     rd_signals = (
         "research and development", "research & development", "r&d", "prototype",
