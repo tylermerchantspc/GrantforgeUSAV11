@@ -1,0 +1,56 @@
+name: Harden generic purpose overlap A1
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - '.github/workflows/harden-generic-purpose-overlap-a1.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      LIVE_GRANTS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/state-grants-a1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements.txt
+      - name: Remove generic purpose words from relevance anchors
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('backend/v11_server.py')
+          s=p.read_text()
+          old='''    "rural", "service", "services", "state", "states", "study", "support", "system", "systems",\n    "technology", "training", "university", "workforce", "year", "years",\n'''
+          new='''    "rural", "service", "services", "state", "states", "study", "support", "system", "systems",\n    "technology", "training", "university", "workforce", "year", "years", "resident", "residents",\n    "through", "reduce", "reducing", "include", "includes", "including", "eligible", "eligibility",\n'''
+          assert old in s
+          p.write_text(s.replace(old,new,1))
+
+          t=Path('backend/tests/test_state_server_integration.py')
+          tests=t.read_text()
+          tests += '''\n\ndef test_generic_resident_through_words_do_not_create_program_purpose_match():\n    payload = {\n        "projectTitle":"Extreme Heat Community Resilience and Cooling Access",\n        "keywords":"extreme heat, climate resilience, cooling, vulnerable communities",\n        "need":"Reduce heat exposure for vulnerable residents through community cooling and resilience services.",\n        "notes":"Nonprofit community resilience program.",\n        "audience":"Residents and community members",\n    }\n    grant = {\n        "title":"Statewide Park Development and Community Revitalization Program",\n        "summary":"Provides funding to develop parks for residents through community-led projects.",\n        "sector_labels":["parks"],\n        "tags":["parks","resident","community"],\n    }\n    ok, note = srv._relevance_compatible(grant, payload, "NONPROFIT")\n    assert ok is False\n'''
+          t.write_text(tests)
+          PY
+      - name: Run targeted and full regression tests
+        run: |
+          pytest -q backend/tests/test_state_server_integration.py backend/tests/test_state_grants_live.py
+          pytest -q backend/tests
+      - name: Commit only if green
+        run: |
+          git config user.name "GrantForgeUSA QA"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/v11_server.py backend/tests/test_state_server_integration.py
+          git commit -m "Block generic purpose overlap false positives"
+          git push origin HEAD:feature/state-grants-a1
