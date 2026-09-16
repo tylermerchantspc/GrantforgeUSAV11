@@ -1,0 +1,256 @@
+name: Integrate state grants A1
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - '.github/workflows/integrate-state-grants-a1.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      LIVE_GRANTS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/state-grants-a1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend requirements
+        run: pip install -r backend/requirements.txt
+      - name: Apply branch-only state integration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('backend/v11_server.py')
+          s = p.read_text()
+
+          old = 'from backend.grantsgov_live import fetch_live_grant, search_live_grants\n'
+          new = '''from backend.grantsgov_live import fetch_live_grant, search_live_grants\nfrom backend.state_grants_live import (\n    SUPPORTED_STATE_CODES,\n    fetch_state_grant,\n    is_official_state_url,\n    search_state_grants,\n)\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''                "source": _sanitize_text(v.get("source", ""), 120),\n            }\n'''
+          new = '''                "source": _sanitize_text(v.get("source", ""), 120),\n                "level": _sanitize_text(v.get("level", ""), 40),\n                "state": _sanitize_text(v.get("state", ""), 10),\n                "funding_origin": _sanitize_text(v.get("funding_origin", ""), 80),\n            }\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''def grant_display_url(gr: Dict[str, Any]) -> str:\n    """Return a validated official Grants.gov URL with direct-link priority."""\n    for key in ("official_url", "program_url", "url", "funding_url"):\n        candidate = _ensure_http_url(gr.get(key) or "")\n        if candidate:\n            return candidate\n\n    direct_identifier = _first_identifier(gr, "opp_id", "opportunity_id")\n'''
+          new = '''def grant_display_url(gr: Dict[str, Any]) -> str:\n    """Return a validated official government URL without weakening federal URL rules."""\n    level = str(gr.get("level") or "").strip().lower()\n    state = _normalize_state(str(gr.get("state") or ""))\n    if level == "state":\n        for key in ("official_url", "program_url", "url", "funding_url"):\n            candidate = str(gr.get(key) or "").strip()\n            if state and is_official_state_url(state, candidate):\n                return candidate\n        return ""\n\n    for key in ("official_url", "program_url", "url", "funding_url"):\n        candidate = _ensure_http_url(gr.get(key) or "")\n        if candidate:\n            return candidate\n\n    direct_identifier = _first_identifier(gr, "opp_id", "opportunity_id")\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          marker = '''def _purchaseable_fit(gr: Dict[str, Any]) -> bool:\n'''
+          addition = '''def _state_verification_complete(gr: Dict[str, Any], applicant_state: str) -> Tuple[bool, str]:\n    """Require enough authoritative state data before a state result can be sold."""\n    if str(gr.get("level") or "").strip().lower() != "state":\n        return True, ""\n    record_state = _normalize_state(str(gr.get("state") or ""))\n    intake_state = _normalize_state(applicant_state)\n    if not record_state or record_state != intake_state:\n        return False, "State opportunity does not match the applicant state."\n    if record_state not in SUPPORTED_STATE_CODES:\n        return False, "State opportunity source is not enabled for GrantForgeUSA paid screening."\n    if not str(gr.get("title") or "").strip():\n        return False, "State opportunity title is missing."\n    if not str(gr.get("eligibility_text") or "").strip():\n        return False, "State applicant eligibility could not be verified from the official opportunity."\n    if not str(gr.get("deadline") or gr.get("close_date") or "").strip():\n        return False, "State application deadline could not be verified from the official opportunity."\n    if _safe_float(gr.get("max_amount"), 0) <= 0:\n        return False, "State award ceiling could not be verified from the official opportunity."\n    if not grant_display_url(gr):\n        return False, "State opportunity does not have an allowlisted official government source URL."\n    return True, "State opportunity verification gate passed."\n\n\ndef _verified_requested_grant(requested_grant: Dict[str, Any], applicant_state: str) -> Dict[str, Any]:\n    """Re-fetch a selected opportunity from its authoritative source before preview/payment."""\n    requested = dict(requested_grant or {})\n    requested_id = _first_identifier(requested, "opp_id", "opportunity_id", "opp_number", "opportunity_number")\n    if not requested_id:\n        return {}\n    level = str(requested.get("level") or "").strip().lower()\n    source = str(requested.get("source") or "")\n    if level == "state":\n        state = _normalize_state(str(requested.get("state") or applicant_state or ""))\n        if state not in SUPPORTED_STATE_CODES or state != _normalize_state(applicant_state):\n            return {}\n        return fetch_state_grant(state, requested_id, refresh=True)\n    if "Grants.gov" in source:\n        return fetch_live_grant(requested_id)\n    return {}\n\n\n'''
+          assert marker in s
+          s = s.replace(marker, addition + marker, 1)
+
+          old = '''    live_grants_enabled = os.getenv("LIVE_GRANTS_ENABLED", "true").lower() != "false"\n    if pinned_grant:\n        grants = [pinned_grant]\n    elif live_grants_enabled:\n        live_query = ", ".join(filter(None, [payload.get("projectTitle", ""), payload.get("keywords", ""), payload.get("need", "")])).strip()\n        grants = search_live_grants(live_query, applicant_type=applicant_type, sector=requested_sector) if live_query else []\n        if not grants:\n            return [], False\n    else:\n        grants = _read_json(GRANTS_PATH) or []\n'''
+          new = '''    live_grants_enabled = os.getenv("LIVE_GRANTS_ENABLED", "true").lower() != "false"\n    if pinned_grant:\n        grants = [pinned_grant]\n    elif live_grants_enabled:\n        live_query = ", ".join(filter(None, [payload.get("projectTitle", ""), payload.get("keywords", ""), payload.get("need", "")])).strip()\n        federal_grants = search_live_grants(live_query, applicant_type=applicant_type, sector=requested_sector) if live_query else []\n        state_code = _normalize_state(str(state_value))\n        state_grants = (\n            search_state_grants(state_code, live_query, applicant_type=applicant_type, sector=requested_sector)\n            if live_query and state_code in SUPPORTED_STATE_CODES\n            else []\n        )\n        grants = list(federal_grants or []) + list(state_grants or [])\n        if not grants:\n            return [], False\n    else:\n        grants = _read_json(GRANTS_PATH) or []\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''            geography_ok, geography_note = _geography_compatible(gr, state_value)\n            funding_ok, funding_note = _funding_range_compatible(gr, amount)\n            relevance_ok, relevance_note = _relevance_compatible(gr, payload, applicant_type)\n            if not geography_ok or not funding_ok or not relevance_ok:\n                continue\n'''
+          new = '''            state_verified, state_note = _state_verification_complete(gr, str(state_value))\n            geography_ok, geography_note = _geography_compatible(gr, state_value)\n            funding_ok, funding_note = _funding_range_compatible(gr, amount)\n            relevance_ok, relevance_note = _relevance_compatible(gr, payload, applicant_type)\n            if not state_verified or not geography_ok or not funding_ok or not relevance_ok:\n                continue\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''                    "screening_notes": " ".join(n for n in (geography_note, funding_note, relevance_note) if n),\n'''
+          new = '''                    "screening_notes": " ".join(n for n in (state_note, geography_note, funding_note, relevance_note) if n),\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''                    "source": gr.get("source", "GrantForgeUSA verified fallback dataset"),\n                    "level": "Federal",\n'''
+          new = '''                    "source": gr.get("source", "GrantForgeUSA verified fallback dataset"),\n                    "level": gr.get("level") or "Federal",\n                    "state": gr.get("state", ""),\n                    "funding_origin": gr.get("funding_origin", "Federal" if not gr.get("level") else ""),\n                    "eligibility_text": gr.get("eligibility_text", ""),\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''    # 1) eligibility (already gated, but weighted highest)\n    score += 100\n    fit_notes.append(f"Applicant category passed preliminary Grants.gov synopsis screening for {applicant_type}; all additional eligibility conditions still require verification in the official notice.")\n'''
+          new = '''    # 1) eligibility (already gated, but weighted highest)\n    score += 100\n    if str(gr.get("level") or "").strip().lower() == "state":\n        fit_notes.append(f"Applicant category passed preliminary official state opportunity screening for {applicant_type}; all additional eligibility conditions still require verification in the official notice.")\n    else:\n        fit_notes.append(f"Applicant category passed preliminary Grants.gov synopsis screening for {applicant_type}; all additional eligibility conditions still require verification in the official notice.")\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''    notice = ""\n    if results and not has_strong_matches:\n        notice = "Potential federal matches found. Review the fit notes and official notice carefully before purchasing."\n    elif not results:\n        notice = "No purchase-ready federal opportunity matched the information provided. Refine the project details, funding request, or search terms and try again."\n'''
+          new = '''    notice = ""\n    if results and not has_strong_matches:\n        notice = "Potential government grant matches found. Review the fit notes and official notice carefully before purchasing."\n    elif not results:\n        notice = "No purchase-ready federal or supported-state opportunity matched the information provided. Refine the project details, funding request, or search terms and try again."\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''    requested_grant = data.get("grant") or {}\n    pinned = {}\n    requested_id = _first_identifier(requested_grant, "opp_id", "opportunity_id")\n    if requested_id and "Grants.gov" in str(requested_grant.get("source") or ""):\n        pinned = fetch_live_grant(requested_id)\n    short, _ = shortlist(data, pinned_grant=pinned) if pinned else shortlist(data)\n    if not short:\n        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422\n'''
+          new = '''    requested_grant = data.get("grant") or {}\n    applicant_state = str(data.get("state") or data.get("eligible_state") or "")\n    pinned = _verified_requested_grant(requested_grant, applicant_state) if requested_grant else {}\n    if requested_grant and not pinned:\n        return jsonify(ok=False, error="Selected opportunity could not be re-verified from its authoritative government source."), 422\n    short, _ = shortlist(data, pinned_grant=pinned) if pinned else shortlist(data)\n    if not short:\n        return jsonify(ok=False, error="No purchase-ready government grant opportunity matches this intake."), 422\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''    pinned = {}\n    requested_id = _first_identifier(requested_grant, "opp_id", "opportunity_id")\n    if requested_id and "Grants.gov" in str(requested_grant.get("source") or ""):\n        pinned = fetch_live_grant(requested_id)\n    short, _ = shortlist(data, pinned_grant=pinned) if pinned else shortlist(data)\n    if not short:\n        return jsonify(ok=False, error="No purchase-ready federal opportunity matches this intake."), 422\n'''
+          new = '''    applicant_state = str(data.get("state") or data.get("eligible_state") or "")\n    pinned = _verified_requested_grant(requested_grant, applicant_state) if requested_grant else {}\n    if requested_grant and not pinned:\n        return jsonify(ok=False, error="Selected opportunity could not be re-verified from its authoritative government source."), 422\n    short, _ = shortlist(data, pinned_grant=pinned) if pinned else shortlist(data)\n    if not short:\n        return jsonify(ok=False, error="No purchase-ready government grant opportunity matches this intake."), 422\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''        "state": (data.get("state") or data.get("eligible_state") or "").strip(),\n        "price": f"{price:.2f}",\n'''
+          new = '''        "state": (data.get("state") or data.get("eligible_state") or "").strip(),\n        "grant_level": grant.get("level", "Federal"),\n        "grant_state": grant.get("state", ""),\n        "grant_opp_id": grant.get("opp_id", ""),\n        "price": f"{price:.2f}",\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          # Source-aware drafting language. Federal output remains unchanged in substance.
+          old = '''    g_title = _sanitize_text(grant.get("title") or "Federal funding opportunity", 240)\n    g_program = _sanitize_text(grant.get("program") or grant.get("agency") or "Federal program", 240)\n'''
+          new = '''    is_state_grant = str(grant.get("level") or "").strip().lower() == "state"\n    opportunity_label = "state funding opportunity" if is_state_grant else "Federal funding opportunity"\n    program_label = "State program" if is_state_grant else "Federal program"\n    source_label = "official state opportunity" if is_state_grant else "Grants.gov synopsis"\n    g_title = _sanitize_text(grant.get("title") or opportunity_label, 240)\n    g_program = _sanitize_text(grant.get("program") or grant.get("agency") or program_label, 240)\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''    synopsis_text = f" The current Grants.gov synopsis states: {g_summary}" if g_summary else ""\n'''
+          new = '''    synopsis_text = f" The current {source_label} states: {g_summary}" if g_summary else ""\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''    elif g_cost_share is True:\n        match_text = " The Grants.gov synopsis indicates cost sharing or matching is required; the amount, basis, and any waiver must be verified in the official notice."\n    elif g_cost_share is False:\n        match_text = " The Grants.gov synopsis indicates cost sharing or matching is not required; verify the current official notice before submission."\n'''
+          new = '''    elif g_cost_share is True:\n        match_text = f" The {source_label} indicates cost sharing or matching is required; the amount, basis, and any waiver must be verified in the official notice."\n    elif g_cost_share is False:\n        match_text = f" The {source_label} indicates cost sharing or matching is not required; verify the current official notice before submission."\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''the selected federal opportunity while preserving applicant responsibility'''
+          new = '''the selected government grant opportunity while preserving applicant responsibility'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Add integration tests
+        run: |
+          cat > backend/tests/test_state_server_integration.py <<'PY'
+          import copy
+          from backend import v11_server as srv
+
+          def payload(state='CA', category='City / County / Local Government', amount=250000):
+              return {
+                  'organization':'Test Applicant','category':category,'state':state,
+                  'annualBudget':5000000,'projectTitle':'Drinking Water Main Replacement',
+                  'amountRequested':amount,'timeline':'18 months','audience':'Residents',
+                  'keywords':'drinking water, water infrastructure, lead service',
+                  'need':'Replace aging drinking water mains and lead service lines.',
+                  'notes':'Local government public water infrastructure project.'
+              }
+
+          def state_grant(**patch):
+              base = {
+                  'title':'Drinking Water Infrastructure Grant',
+                  'program':'California Water Agency','agency':'California Water Agency',
+                  'official_url':'https://data.ca.gov/example','program_url':'https://data.ca.gov/example',
+                  'opp_id':'CA-100','opportunity_id':'CA-100','opp_number':'CA-WATER-100',
+                  'deadline':'2026-12-15','close_date':'2026-12-15',
+                  'min_amount':0,'max_amount':500000,
+                  'eligibility_text':'Eligible applicants include local governments, counties, cities, and municipalities.',
+                  'eligible_types':['local government','counties','cities','municipalities'],
+                  'eligibility_codes':[],
+                  'summary':'Funds drinking water infrastructure, water mains, and lead service line replacement.',
+                  'sector_labels':['water infrastructure'],'sector':'water / infrastructure',
+                  'tags':['drinking water','water infrastructure','lead service'],
+                  'source':'California Grants Portal live state data','level':'State','state':'CA','funding_origin':'State',
+                  'cost_sharing_required':False,'requires_match_percent':0,
+              }
+              base.update(patch)
+              return base
+
+          def federal_grant():
+              return {
+                  'title':'Federal Drinking Water Infrastructure Grant','program':'Federal Water Program',
+                  'official_url':'https://www.grants.gov/opportunity/details/999999','program_url':'https://www.grants.gov/opportunity/details/999999',
+                  'opp_id':'999999','opportunity_id':'999999','opp_number':'FED-WATER',
+                  'deadline':'2026-12-20','close_date':'2026-12-20','min_amount':0,'max_amount':500000,
+                  'eligibility_text':'City or township governments and county governments are eligible.',
+                  'eligible_types':['local government'],'eligibility_codes':['02','04'],
+                  'summary':'Funds drinking water infrastructure, water mains, and lead service line replacement.',
+                  'sector_labels':['water infrastructure'],'sector':'water / infrastructure',
+                  'tags':['drinking water','water infrastructure','lead service'],
+                  'source':'Grants.gov live data','level':'Federal','cost_sharing_required':False,'requires_match_percent':0,
+              }
+
+          def test_supported_state_merges_federal_and_state(monkeypatch):
+              monkeypatch.setenv('LIVE_GRANTS_ENABLED','true')
+              monkeypatch.setattr(srv, 'search_live_grants', lambda *a, **k: [federal_grant()])
+              monkeypatch.setattr(srv, 'search_state_grants', lambda *a, **k: [state_grant()])
+              rows, _ = srv.shortlist(payload())
+              levels = {r['level'] for r in rows}
+              assert levels == {'Federal','State'}
+
+          def test_unsupported_state_never_calls_state_source(monkeypatch):
+              monkeypatch.setenv('LIVE_GRANTS_ENABLED','true')
+              monkeypatch.setattr(srv, 'search_live_grants', lambda *a, **k: [federal_grant()])
+              def explode(*a, **k):
+                  raise AssertionError('unsupported state source called')
+              monkeypatch.setattr(srv, 'search_state_grants', explode)
+              rows, _ = srv.shortlist(payload(state='MN'))
+              assert rows and all(r['level']=='Federal' for r in rows)
+
+          def test_state_source_failure_can_fail_closed_without_affecting_federal(monkeypatch):
+              monkeypatch.setenv('LIVE_GRANTS_ENABLED','true')
+              monkeypatch.setattr(srv, 'search_live_grants', lambda *a, **k: [federal_grant()])
+              monkeypatch.setattr(srv, 'search_state_grants', lambda *a, **k: [])
+              rows, _ = srv.shortlist(payload())
+              assert len(rows)==1 and rows[0]['level']=='Federal'
+
+          def test_state_missing_critical_verification_fields_is_not_purchase_ready(monkeypatch):
+              monkeypatch.setenv('LIVE_GRANTS_ENABLED','true')
+              monkeypatch.setattr(srv, 'search_live_grants', lambda *a, **k: [])
+              for patch in ({'deadline':''},{'eligibility_text':''},{'max_amount':0},{'official_url':'https://evil.example/grant','program_url':'https://evil.example/grant'}):
+                  monkeypatch.setattr(srv, 'search_state_grants', lambda *a, _p=patch, **k: [state_grant(**_p)])
+                  rows, _ = srv.shortlist(payload())
+                  assert rows == []
+
+          def test_state_amount_and_relevance_hard_gates_still_apply(monkeypatch):
+              monkeypatch.setenv('LIVE_GRANTS_ENABLED','true')
+              monkeypatch.setattr(srv, 'search_live_grants', lambda *a, **k: [])
+              monkeypatch.setattr(srv, 'search_state_grants', lambda *a, **k: [state_grant(max_amount=100000)])
+              assert srv.shortlist(payload(amount=250000))[0] == []
+              bad = state_grant(title='Arts Festival Grant',summary='Supports visual arts exhibitions and cultural programming.',sector_labels=['arts'],sector='arts / culture',tags=['arts'])
+              monkeypatch.setattr(srv, 'search_state_grants', lambda *a, **k: [bad])
+              assert srv.shortlist(payload())[0] == []
+
+          def test_state_display_url_does_not_accept_arbitrary_host():
+              assert srv.grant_display_url(state_grant()) == 'https://data.ca.gov/example'
+              bad = state_grant(official_url='https://evil.example/grant',program_url='https://evil.example/grant')
+              assert srv.grant_display_url(bad) == ''
+
+          def test_selected_state_grant_is_refetched_and_browser_tampering_ignored(monkeypatch):
+              requested = state_grant(title='FORGED TITLE',max_amount=99999999)
+              monkeypatch.setattr(srv, 'fetch_state_grant', lambda state, ident, refresh=True: state_grant())
+              live = srv._verified_requested_grant(requested,'CA')
+              assert live['title']=='Drinking Water Infrastructure Grant'
+              assert live['max_amount']==500000
+
+          def test_wrong_state_selected_grant_rejected(monkeypatch):
+              requested = state_grant(state='CA')
+              monkeypatch.setattr(srv, 'fetch_state_grant', lambda *a, **k: (_ for _ in ()).throw(AssertionError('should not fetch')))
+              assert srv._verified_requested_grant(requested,'IA') == {}
+
+          def test_state_draft_uses_state_source_language_not_grantsgov():
+              text = srv.build_narrative(payload(), state_grant())
+              assert 'official state opportunity' in text
+              assert 'selected government grant opportunity' in text
+              assert 'current Grants.gov synopsis states' not in text
+
+          def test_federal_draft_retains_grantsgov_source_language():
+              text = srv.build_narrative(payload(), federal_grant())
+              assert 'Grants.gov synopsis' in text
+          PY
+
+      - name: Run tests before commit
+        run: |
+          pytest -q backend/tests/test_state_grants_live.py backend/tests/test_state_server_integration.py
+          pytest -q backend/tests
+      - name: Commit verified integration
+        run: |
+          git config user.name "GrantForgeUSA QA"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/v11_server.py backend/tests/test_state_server_integration.py
+          git commit -m "Integrate verified state grants into matcher branch"
+          git push origin HEAD:feature/state-grants-a1
