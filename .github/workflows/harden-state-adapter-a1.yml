@@ -1,0 +1,61 @@
+name: Harden state adapters A1
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - '.github/workflows/harden-state-adapter-a1.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/state-grants-a1
+      - name: Apply conservative adapter hardening
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('backend/state_grants_live.py')
+          s = p.read_text()
+
+          old = '''        if not _allowed_state_url("CA", url):\n            url = f"https://www.grants.ca.gov/grants/{row.get('PortalID')}/"\n'''
+          new = '''        if not _allowed_state_url("CA", url):\n            # Do not invent a record-specific URL. Fall back to the authoritative\n            # statewide portal when an agency link is not on an allowlisted CA host.\n            url = STATE_SOURCE_INFO["CA"]["public_url"]\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''    # Conservative product scope: Iowa storefront records must explicitly describe grant funding.\n    if " grant" not in plain.lower() and "grant " not in plain.lower():\n        return None\n'''
+          new = '''    # Conservative product scope: reject loan-only instruments even when generic\n    # IowaGrants boilerplate elsewhere on the page happens to contain the word grant.\n    title_lower = title.lower()\n    if re.search(r"\\bloans?\\b", title_lower) and not re.search(r"\\bgrants?\\b", title_lower):\n        return None\n    if not re.search(r"\\bgrants?\\b", title_lower):\n        explicit_grant = re.search(\n            r"\\b(?:grant program|grant funding|grant award|grant funds|grant application)\\b",\n            plain,\n            flags=re.I,\n        )\n        if not explicit_grant:\n            return None\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''    dates = re.findall(r"\\d{2}/\\d{2}/20\\d{2}|[A-Z][a-z]+\\s+\\d{1,2},\\s+20\\d{2}", date_range)\n'''
+          new = '''    dates = re.findall(r"\\d{1,2}/\\d{1,2}/20\\d{2}|[A-Z][a-z]+\\s+\\d{1,2},\\s+20\\d{2}", date_range)\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          marker = '''def state_source_status() -> Dict[str, Dict[str, Any]]:\n'''
+          addition = '''def fetch_state_grant(state: str, identifier: str, refresh: bool = True) -> Dict[str, Any]:\n    """Re-fetch and return one official state opportunity by normalized identifier.\n\n    Payment-adjacent callers should keep refresh=True so a selected opportunity is\n    revalidated against the authoritative state source instead of trusting client data.\n    """\n    code = (state or "").strip().upper()\n    wanted = str(identifier or "").strip()\n    if code not in SUPPORTED_STATE_CODES or not wanted:\n        return {}\n    loader = {"CA": _ca_records, "IL": _il_records, "IA": _ia_records}[code]\n    if refresh:\n        try:\n            records = loader()\n        except Exception:\n            return {}\n        with _CACHE_LOCK:\n            _CACHE[code] = {"ts": time.time(), "items": [dict(x) for x in records]}\n    else:\n        records = _cached(code, loader)\n    for item in records:\n        keys = {\n            str(item.get("opp_id") or "").strip(),\n            str(item.get("opportunity_id") or "").strip(),\n            str(item.get("opp_number") or "").strip(),\n        }\n        if wanted in keys:\n            return dict(item)\n    return {}\n\n\n'''
+          assert marker in s
+          s = s.replace(marker, addition + marker, 1)
+          p.write_text(s)
+
+          t = Path('backend/tests/test_state_grants_live.py')
+          tests = t.read_text()
+          tests += r'''\n\ndef test_iowa_loan_only_title_is_rejected_even_with_grant_boilerplate(monkeypatch):\n    page = """\n    <html><body>\n    991122 - Iowa Energy Saving Loans\n    Funding Opportunity Details\n    Final Application Deadline: Dec 1, 2026 11:59 PM\n    Status Posted Posted Date Sep 1, 2026 1:00 PM\n    Award Amount Range No Limit - $1,000,000 Project Dates 01/01/2027 - 12/31/2027\n    Purpose This loan program finances energy improvements.\n    Eligible Applicants Iowa businesses are eligible.\n    The IowaGrants system also hosts grant application records.\n    Eligibility Requirements Applicant must be in Iowa.\n    </body></html>\n    """\n    monkeypatch.setattr(sg, "_get", lambda url, timeout=12.0: page)\n    assert sg._ia_detail("https://www.iowagrants.gov/viewStorefrontOpportunity.do?OIDString=loan") is None\n\n\ndef test_source_failure_fails_closed(monkeypatch):\n    sg._CACHE.clear()\n    def boom():\n        raise RuntimeError("source unavailable")\n    monkeypatch.setattr(sg, "_ca_records", boom)\n    assert sg.search_state_grants("CA", "water") == []\n\n\ndef test_fetch_state_grant_requires_exact_identifier_and_can_refresh(monkeypatch):\n    sg._CACHE.clear()\n    monkeypatch.setattr(sg, "_ca_records", lambda: [{\n        "opp_id": "CA-123", "opportunity_id": "CA-123", "opp_number": "SWC 123",\n        "title": "Verified Water Grant", "official_url": "https://data.ca.gov/example"\n    }])\n    assert sg.fetch_state_grant("CA", "CA-123", refresh=True)["title"] == "Verified Water Grant"\n    assert sg.fetch_state_grant("CA", "CA-999", refresh=True) == {}\n'''
+          t.write_text(tests)
+          PY
+      - name: Commit hardening
+        run: |
+          git config user.name "GrantForgeUSA QA"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/state_grants_live.py backend/tests/test_state_grants_live.py
+          git commit -m "Harden state grant source filtering and reverification"
+          git push origin HEAD:feature/state-grants-a1
