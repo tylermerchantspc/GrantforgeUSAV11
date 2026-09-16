@@ -115,4 +115,50 @@ def test_query_prefilter_requires_real_topic_overlap(monkeypatch):
     assert sg.search_state_grants("CA", "drinking water lead service")
     sg._CACHE.clear()
     assert sg.search_state_grants("CA", "domestic violence legal advocacy") == []
-\n\ndef test_iowa_loan_only_title_is_rejected_even_with_grant_boilerplate(monkeypatch):\n    page = """\n    <html><body>\n    991122 - Iowa Energy Saving Loans\n    Funding Opportunity Details\n    Final Application Deadline: Dec 1, 2026 11:59 PM\n    Status Posted Posted Date Sep 1, 2026 1:00 PM\n    Award Amount Range No Limit - $1,000,000 Project Dates 01/01/2027 - 12/31/2027\n    Purpose This loan program finances energy improvements.\n    Eligible Applicants Iowa businesses are eligible.\n    The IowaGrants system also hosts grant application records.\n    Eligibility Requirements Applicant must be in Iowa.\n    </body></html>\n    """\n    monkeypatch.setattr(sg, "_get", lambda url, timeout=12.0: page)\n    assert sg._ia_detail("https://www.iowagrants.gov/viewStorefrontOpportunity.do?OIDString=loan") is None\n\n\ndef test_source_failure_fails_closed(monkeypatch):\n    sg._CACHE.clear()\n    def boom():\n        raise RuntimeError("source unavailable")\n    monkeypatch.setattr(sg, "_ca_records", boom)\n    assert sg.search_state_grants("CA", "water") == []\n\n\ndef test_fetch_state_grant_requires_exact_identifier_and_can_refresh(monkeypatch):\n    sg._CACHE.clear()\n    monkeypatch.setattr(sg, "_ca_records", lambda: [{\n        "opp_id": "CA-123", "opportunity_id": "CA-123", "opp_number": "SWC 123",\n        "title": "Verified Water Grant", "official_url": "https://data.ca.gov/example"\n    }])\n    assert sg.fetch_state_grant("CA", "CA-123", refresh=True)["title"] == "Verified Water Grant"\n    assert sg.fetch_state_grant("CA", "CA-999", refresh=True) == {}\n
+
+
+def test_iowa_loan_only_title_is_rejected_even_with_grant_boilerplate(monkeypatch):
+    page = """
+    <html><body>
+    991122 - Iowa Energy Saving Loans
+    Funding Opportunity Details
+    Final Application Deadline: Dec 1, 2026 11:59 PM
+    Status Posted Posted Date Sep 1, 2026 1:00 PM
+    Award Amount Range No Limit - $1,000,000 Project Dates 01/01/2027 - 12/31/2027
+    Purpose This loan program finances energy improvements.
+    Eligible Applicants Iowa businesses are eligible.
+    The IowaGrants system also hosts grant application records.
+    Eligibility Requirements Applicant must be in Iowa.
+    </body></html>
+    """
+    monkeypatch.setattr(sg, "_get", lambda url, timeout=12.0: page)
+    assert sg._ia_detail("https://www.iowagrants.gov/viewStorefrontOpportunity.do?OIDString=loan") is None
+
+
+def test_source_failure_fails_closed(monkeypatch):
+    sg._CACHE.clear()
+
+    def boom():
+        raise RuntimeError("source unavailable")
+
+    monkeypatch.setattr(sg, "_ca_records", boom)
+    assert sg.search_state_grants("CA", "water") == []
+
+
+def test_fetch_state_grant_requires_exact_identifier_and_can_refresh(monkeypatch):
+    sg._CACHE.clear()
+    monkeypatch.setattr(
+        sg,
+        "_ca_records",
+        lambda: [
+            {
+                "opp_id": "CA-123",
+                "opportunity_id": "CA-123",
+                "opp_number": "SWC 123",
+                "title": "Verified Water Grant",
+                "official_url": "https://data.ca.gov/example",
+            }
+        ],
+    )
+    assert sg.fetch_state_grant("CA", "CA-123", refresh=True)["title"] == "Verified Water Grant"
+    assert sg.fetch_state_grant("CA", "CA-999", refresh=True) == {}
