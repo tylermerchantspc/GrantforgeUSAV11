@@ -1,0 +1,114 @@
+name: QA state live matrix A1
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - '.github/workflows/qa-state-live-matrix-a1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: .
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      LIVE_GRANTS_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements.txt
+      - name: Run live CA IL IA client matrix
+        run: |
+          python - <<'PY'
+          import json, re
+          from backend import v11_server as srv
+
+          def client(label,state,category,title,amount,keywords,need,notes='',budget=5000000,audience='Residents and community members'):
+              return {
+                  'label': label,
+                  'payload': {
+                      'organization': label + ' Test Applicant',
+                      'contactName': 'GrantForge QA',
+                      'contactEmail': label.lower()+'@example.com',
+                      'zip': {'CA':'95814','IL':'62701','IA':'50319'}[state],
+                      'state': state,
+                      'category': category,
+                      'annualBudget': budget,
+                      'projectTitle': title,
+                      'amountRequested': amount,
+                      'timeline': '18 months',
+                      'audience': audience,
+                      'keywords': keywords,
+                      'need': need,
+                      'notes': notes,
+                  }
+              }
+
+          clients = [
+              client('CA_WATER','CA','City / County / Local Government','Drinking Water Main and Lead Service Line Replacement',250000,'drinking water, water infrastructure, lead service lines','Replace aging drinking water mains and lead service lines.','Municipal public water infrastructure project.'),
+              client('CA_HEAT','CA','501(c)(3) Nonprofit','Extreme Heat Community Resilience and Cooling Access',150000,'extreme heat, climate resilience, cooling, vulnerable communities','Reduce heat exposure for vulnerable residents through community cooling and resilience services.','Nonprofit community resilience program.'),
+              client('CA_DV','CA','501(c)(3) Nonprofit','Domestic Violence Legal Advocacy and Survivor Safety',200000,'domestic violence, victim services, legal advocacy','Expand legal advocacy and safety planning for domestic violence survivors.','Victim service nonprofit.'),
+              client('IL_WORKFORCE','IL','501(c)(3) Nonprofit','Youth Workforce Training and Employment Pathways',200000,'workforce, employment, job training, youth','Expand workforce training and employment pathways for disadvantaged youth.','Nonprofit workforce provider.'),
+              client('IL_ENERGY','IL','City / County / Local Government','Community Energy Efficiency Workforce Program',300000,'energy efficiency, workforce, clean energy, training','Train residents for energy-efficiency jobs and improve community energy outcomes.','Local government workforce and energy initiative.'),
+              client('IL_WATER','IL','City / County / Local Government','Drinking Water Infrastructure Replacement',500000,'drinking water, water main, lead service, infrastructure','Replace municipal drinking water mains and lead service lines.','Local government water project.'),
+              client('IA_ENERGY','IA','Small Business','Industrial Energy Efficiency Technology Demonstration',300000,'energy efficiency, manufacturing, technology demonstration','Demonstrate energy-saving technology in Iowa manufacturing operations.','Iowa small business technology project.',budget=1200000),
+              client('IA_DISASTER','IA','City / County / Local Government','Flood Disaster Property Buyout and Mitigation',750000,'flood, disaster recovery, property buyout, hazard mitigation','Acquire repeatedly flooded properties and reduce future disaster losses.','County disaster mitigation project.'),
+              client('IA_WORKFORCE','IA','State Government / Agency','Advanced Manufacturing Workforce Training Expansion',500000,'workforce, manufacturing, job training, career pathways','Expand advanced manufacturing workforce training and employer partnerships.','State workforce initiative.'),
+              client('IA_ARTS_NEG','IA','501(c)(3) Nonprofit','Traditional Arts and Folk Music Preservation',100000,'arts, folk music, cultural heritage, preservation','Document and preserve traditional arts and folk music.','Arts nonprofit; deliberately unrelated to energy/disaster/workforce.'),
+              client('CA_IMPOSSIBLE_AMOUNT','CA','501(c)(3) Nonprofit','Extreme Heat Community Resilience and Cooling Access',50000000,'extreme heat, climate resilience, cooling','Reduce extreme heat exposure for vulnerable residents.','Deliberately impossible request amount.'),
+          ]
+
+          report=[]
+          failures=[]
+          for c in clients:
+              rows, strong = srv.shortlist(c['payload'])
+              compact=[]
+              for r in rows:
+                  compact.append({k:r.get(k) for k in ('title','level','state','opp_id','deadline','max_amount','fit','purchasable','source','official_url','screening_notes')})
+                  if r.get('level') == 'State':
+                      if r.get('state') != c['payload']['state']:
+                          failures.append([c['label'],'wrong_state',r.get('title')])
+                      if not r.get('deadline') or not r.get('max_amount') or not r.get('official_url'):
+                          failures.append([c['label'],'missing_verified_field',r.get('title')])
+                      if not srv.is_official_state_url(r.get('state'), r.get('official_url')):
+                          failures.append([c['label'],'bad_official_url',r.get('official_url')])
+                      title=(r.get('title') or '').lower()
+                      if re.search(r'\bloans?\b', title) and not re.search(r'\bgrants?\b', title):
+                          failures.append([c['label'],'loan_only',r.get('title')])
+              report.append({'label':c['label'],'strong':strong,'count':len(rows),'results':compact})
+              print('\nCLIENT', c['label'])
+              print(json.dumps(report[-1], indent=2))
+
+          # Negative controls may return legitimate federal opportunities, but must not
+          # receive an obviously wrong state opportunity through loose matching.
+          for item in report:
+              if item['label']=='IA_ARTS_NEG':
+                  bad_terms=('energy','disaster','workforce','manufacturing')
+                  for r in item['results']:
+                      if r.get('level')=='State' and any(t in (r.get('title') or '').lower() for t in bad_terms):
+                          failures.append([item['label'],'semantic_false_positive',r.get('title')])
+              if item['label']=='CA_IMPOSSIBLE_AMOUNT':
+                  for r in item['results']:
+                      if r.get('level')=='State':
+                          failures.append([item['label'],'amount_gate_failed',r.get('title')])
+
+          print('\nSUMMARY')
+          print('clients',len(report))
+          print('failures',json.dumps(failures,indent=2))
+          print('state_results',sum(1 for x in report for r in x['results'] if r.get('level')=='State'))
+          with open('state-live-matrix.json','w') as f: json.dump({'report':report,'failures':failures},f,indent=2)
+          assert not failures, failures
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: state-live-matrix-a1
+          path: state-live-matrix.json
