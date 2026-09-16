@@ -1,0 +1,76 @@
+name: QA fossil fix live A1
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - '.github/workflows/qa-fossil-fix-live-a1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      LIVE_GRANTS_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements.txt
+      - name: Verify live fossil-sector rejection and adjacent controls
+        run: |
+          python - <<'PY'
+          from backend import v11_server as srv
+
+          def p(state, category, title, amount, keywords, need, notes):
+              return {
+                  'organization':'GrantForge QA','contactName':'QA','contactEmail':'qa@example.com',
+                  'zip':{'IA':'50319','CA':'95814','MN':'56031','TN':'37219'}[state],
+                  'state':state,'category':category,'annualBudget':5000000,
+                  'projectTitle':title,'amountRequested':amount,'timeline':'18 months',
+                  'audience':'Community and project beneficiaries','keywords':keywords,'need':need,'notes':notes,
+              }
+
+          ia = p('IA','Small Business','Iowa Energy Efficiency Technology Demonstration',300000,
+                 'energy, energy efficiency, manufacturing, technology demonstration, research and development',
+                 'Demonstrate and validate energy-saving technology for Iowa commercial and industrial users.',
+                 'Iowa small business energy technology project.')
+          rows,_ = srv.shortlist(ia)
+          titles=[r.get('title','') for r in rows]
+          print('IA_GENERIC_ENERGY', titles)
+          assert not any('Oil and Natural Gas Production and Delivery' in t for t in titles), titles
+
+          ca = p('CA','501(c)(3) Nonprofit','Extreme Heat Community Resilience and Cooling Access',150000,
+                 'extreme heat, climate resilience, cooling, vulnerable communities',
+                 'Reduce heat exposure through community cooling and climate resilience services.',
+                 'Nonprofit community resilience program.')
+          rows,_ = srv.shortlist(ca)
+          state_rows=[r for r in rows if r.get('level')=='State']
+          print('CA_STATE', [(r.get('title'),r.get('opp_id')) for r in state_rows])
+          assert state_rows, 'California positive state control disappeared'
+          assert not any('Park Development' in r.get('title','') for r in state_rows)
+
+          mn = p('MN','Public College / University','Rural Agricultural STEM Career Pathways',150000,
+                 'STEM, agriculture, rural youth, agricultural science, engineering, careers',
+                 'Expand hands-on agricultural science, engineering, mentoring, and career pathways.',
+                 'Public university education and extension project.')
+          rows,_ = srv.shortlist(mn)
+          print('FED_AG', [r.get('title') for r in rows])
+          assert any('Agriculture and Food Research Initiative' in r.get('title','') for r in rows)
+
+          tn = p('TN','501(c)(3) Nonprofit','Rural Domestic Violence Legal Advocacy and Safety Services',300000,
+                 'domestic violence, victim services, legal advocacy, rural',
+                 'Expand trauma-informed legal advocacy and coordinated victim services.',
+                 'Nonprofit victim-service provider.')
+          rows,_=srv.shortlist(tn)
+          print('FED_DV',[r.get('title') for r in rows])
+          assert any('Violence and Abuse' in r.get('title','') for r in rows)
+          PY
