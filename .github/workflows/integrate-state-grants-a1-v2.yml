@@ -1,0 +1,71 @@
+name: Integrate state grants A1 v2
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - '.github/workflows/integrate-state-grants-a1-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      LIVE_GRANTS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/state-grants-a1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements.txt
+      - name: Apply integration patch and semantic collision fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/integrate-state-grants-a1.yml').read_text()
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY\n\n      - name: Add integration tests"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          lines = workflow[start:end].splitlines()
+          patch = "\n".join(line[10:] if line.startswith("          ") else line for line in lines)
+          exec(compile(patch, 'state-integration-patch', 'exec'), {})
+
+          p = Path('backend/v11_server.py')
+          s = p.read_text()
+          old = '''    "aging": ("aging", "geriatric", "alzheimer", "older adults"),\n'''
+          new = '''    "aging": ("aging research", "biology of aging", "age-related disease", "geriatric", "alzheimer"),\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # Recreate the integration test file from the original workflow.
+          test_start_marker = "          cat > backend/tests/test_state_server_integration.py <<'PY'\n"
+          test_end_marker = "\n          PY\n\n      - name: Run tests before commit"
+          ts = workflow.index(test_start_marker) + len(test_start_marker)
+          te = workflow.index(test_end_marker, ts)
+          test_lines = workflow[ts:te].splitlines()
+          tests = "\n".join(line[10:] if line.startswith("          ") else line for line in test_lines)
+          tests += '''\n\ndef test_aging_infrastructure_language_does_not_trigger_geriatric_strict_group():\n    text = "Replace aging drinking water mains in a rural community"\n    assert "aging" not in srv._purpose_groups(text)\n\ndef test_explicit_aging_research_still_triggers_aging_group():\n    assert "aging" in srv._purpose_groups("biology of aging and geriatric research")\n'''
+          Path('backend/tests/test_state_server_integration.py').write_text(tests)
+          PY
+      - name: Run state, integration, and full backend regressions
+        run: |
+          pytest -q backend/tests/test_state_grants_live.py backend/tests/test_state_server_integration.py
+          pytest -q backend/tests
+      - name: Commit only after green tests
+        run: |
+          git config user.name "GrantForgeUSA QA"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/v11_server.py backend/tests/test_state_server_integration.py
+          git commit -m "Integrate state grants with verified purchase gates"
+          git push origin HEAD:feature/state-grants-a1
