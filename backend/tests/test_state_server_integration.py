@@ -118,3 +118,21 @@ def test_aging_infrastructure_language_does_not_trigger_geriatric_strict_group()
 
 def test_explicit_aging_research_still_triggers_aging_group():
     assert "aging" in srv._purpose_groups("biology of aging and geriatric research")
+
+
+def test_generic_resident_through_words_do_not_create_program_purpose_match():
+    payload = {
+        "projectTitle":"Extreme Heat Community Resilience and Cooling Access",
+        "keywords":"extreme heat, climate resilience, cooling, vulnerable communities",
+        "need":"Reduce heat exposure for vulnerable residents through community cooling and resilience services.",
+        "notes":"Nonprofit community resilience program.",
+        "audience":"Residents and community members",
+    }
+    grant = {
+        "title":"Statewide Park Development and Community Revitalization Program",
+        "summary":"Provides funding to develop parks for residents through community-led projects.",
+        "sector_labels":["parks"],
+        "tags":["parks","resident","community"],
+    }
+    ok, note = srv._relevance_compatible(grant, payload, "NONPROFIT")
+    assert ok is False

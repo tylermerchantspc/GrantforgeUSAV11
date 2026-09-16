@@ -798,7 +798,8 @@ _PURPOSE_STOPWORDS = {
     "local", "million", "national", "nonprofit", "organization", "organizations", "people",
     "program", "programs", "project", "projects", "provide", "providing", "public", "research",
     "rural", "service", "services", "state", "states", "study", "support", "system", "systems",
-    "technology", "training", "university", "workforce", "year", "years",
+    "technology", "training", "university", "workforce", "year", "years", "resident", "residents",
+    "through", "reduce", "reducing", "include", "includes", "including", "eligible", "eligibility",
 }
 
 _PURPOSE_TOKEN_ALIASES = {
