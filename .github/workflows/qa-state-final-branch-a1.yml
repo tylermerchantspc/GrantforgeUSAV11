@@ -1,0 +1,125 @@
+name: QA state final branch A1
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - '.github/workflows/qa-state-final-branch-a1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: .
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      LIVE_GRANTS_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements.txt
+      - name: Run live state and federal regression matrix
+        run: |
+          python - <<'PY'
+          import json, re
+          from backend import v11_server as srv
+
+          def payload(state, category, title, amount, keywords, need, notes='', budget=5000000, audience='Residents and community members'):
+              return {
+                  'organization':'GrantForge QA Applicant','contactName':'GrantForge QA','contactEmail':'qa@example.com',
+                  'zip':{'CA':'95814','IL':'62701','IA':'50319','MN':'56031','TN':'37219','WV':'25301','WI':'53703'}[state],
+                  'state':state,'category':category,'annualBudget':budget,'projectTitle':title,
+                  'amountRequested':amount,'timeline':'18 months','audience':audience,'keywords':keywords,'need':need,'notes':notes,
+              }
+
+          state_cases = [
+              ('CA_HEAT', payload('CA','501(c)(3) Nonprofit','Extreme Heat Community Resilience and Cooling Access',150000,'extreme heat, climate resilience, cooling, vulnerable communities','Reduce heat exposure through community cooling and climate resilience services.','Nonprofit community resilience program.')),
+              ('IL_REDEPLOY', payload('IL','City / County / Local Government','Youth Justice Diversion and Redeploy Planning',100000,'youth justice, juvenile diversion, community services, planning','Plan community-based diversion services that reduce youth incarceration and improve local justice outcomes.','County youth justice planning initiative.')),
+              ('IA_ENERGY', payload('IA','Small Business','Iowa Energy Efficiency Technology Demonstration',300000,'energy, energy efficiency, technology demonstration, research and development','Demonstrate and validate energy-saving technology for Iowa commercial and industrial users.','Iowa small business energy technology project.',budget=1200000)),
+              ('IA_ARTS_NEG', payload('IA','501(c)(3) Nonprofit','Traditional Arts and Folk Music Preservation',100000,'arts, folk music, cultural heritage, preservation','Document and preserve traditional arts and folk music.','Deliberately unrelated negative control.')),
+              ('CA_DV_NEG', payload('CA','501(c)(3) Nonprofit','Domestic Violence Legal Advocacy and Survivor Safety',200000,'domestic violence, victim services, legal advocacy','Expand legal advocacy and safety planning for survivors.','Victim services negative control.')),
+              ('CA_AMOUNT_NEG', payload('CA','501(c)(3) Nonprofit','Extreme Heat Community Resilience and Cooling Access',50000000,'extreme heat, climate resilience, cooling','Reduce extreme heat exposure through cooling and resilience services.','Impossible funding request control.')),
+          ]
+
+          all_report=[]
+          failures=[]
+          state_positive={'CA':False,'IL':False,'IA':False}
+          for label,p in state_cases:
+              rows,strong=srv.shortlist(p)
+              compact=[]
+              for r in rows:
+                  item={k:r.get(k) for k in ('title','level','state','opp_id','deadline','max_amount','fit','purchasable','source','official_url','screening_notes')}
+                  compact.append(item)
+                  if r.get('level')=='State':
+                      state_positive[r.get('state')]=True
+                      if r.get('state') != p['state']: failures.append([label,'wrong_state',r.get('title')])
+                      if not r.get('deadline') or not r.get('max_amount') or not r.get('eligibility_text') or not r.get('official_url'):
+                          failures.append([label,'missing_verified_field',r.get('title')])
+                      if not srv.is_official_state_url(r.get('state'),r.get('official_url')):
+                          failures.append([label,'bad_url',r.get('official_url')])
+                      title=(r.get('title') or '').lower()
+                      if re.search(r'\bloans?\b',title) and not re.search(r'\bgrants?\b',title):
+                          failures.append([label,'loan_only',r.get('title')])
+              all_report.append({'label':label,'results':compact})
+              print('\nSTATE_CASE',label,json.dumps(compact,indent=2))
+
+          # Explicit semantic negatives.
+          for case in all_report:
+              if case['label']=='CA_HEAT':
+                  for r in case['results']:
+                      if r.get('level')=='State' and 'park development' in (r.get('title') or '').lower():
+                          failures.append(['CA_HEAT','park_false_positive',r.get('title')])
+              if case['label']=='IA_ARTS_NEG':
+                  for r in case['results']:
+                      if r.get('level')=='State' and any(x in (r.get('title') or '').lower() for x in ('energy','disaster','workforce','manufacturing')):
+                          failures.append(['IA_ARTS_NEG','semantic_false_positive',r.get('title')])
+              if case['label']=='CA_AMOUNT_NEG':
+                  for r in case['results']:
+                      if r.get('level')=='State': failures.append(['CA_AMOUNT_NEG','amount_gate_failed',r.get('title')])
+
+          # Federal regression controls, with state search deliberately disabled to isolate federal behavior.
+          real_state_search=srv.search_state_grants
+          srv.search_state_grants=lambda *a, **k: []
+          federal_cases = [
+              ('FED_AG', payload('MN','Public College / University','Rural Agricultural STEM Career Pathways',150000,'STEM, agriculture, rural youth, agricultural science, engineering, careers','Expand hands-on agricultural science, engineering, mentoring, and career pathways.','Public university education and extension project.')),
+              ('FED_WATER', payload('MN','City / County / Local Government','Drinking Water Main Replacement and Lead Service Reduction',850000,'drinking water, lead service lines, water infrastructure','Replace aging water mains and reduce lead service line exposure.','City-owned public water system.')),
+              ('FED_DV', payload('TN','501(c)(3) Nonprofit','Rural Domestic Violence Legal Advocacy and Safety Services',300000,'domestic violence, victim services, legal advocacy, rural','Expand trauma-informed legal advocacy and coordinated victim services.','Nonprofit victim-service provider.')),
+              ('FED_OPIOID', payload('WV','City / County / Local Government','Rural Opioid Overdose Prevention and Recovery Network',450000,'opioid, overdose prevention, recovery, naloxone','Reduce fatal overdoses and expand treatment and recovery navigation.','Operational county health service project.')),
+              ('FED_MH_RESEARCH', payload('WI','Private College / University','Rural Adolescent Suicide Prevention Research',725000,'suicide prevention, adolescent mental health, behavioral health, rural, clinical research','Evaluate a community-linked suicide-prevention intervention.','University clinical research project.')),
+          ]
+          for label,p in federal_cases:
+              rows,strong=srv.shortlist(p)
+              titles=[(r.get('title') or '') for r in rows]
+              print('\nFED_CASE',label,json.dumps(titles,indent=2))
+              low=' '.join(titles).lower()
+              if label=='FED_WATER' and any(x in low for x in ('global health','brain initiative','alzheimer')):
+                  failures.append([label,'legacy_bad_match',titles])
+              if label=='FED_OPIOID' and any(x in low for x in ('r61','r33','clinical neuroscience')):
+                  failures.append([label,'research_mode_leak',titles])
+              if any(str(r.get('opp_id')) in {'310029','363174'} for r in rows):
+                  failures.append([label,'expired_regression',titles])
+          srv.search_state_grants=real_state_search
+
+          # CA must demonstrate a positive state path. IL/IA source availability is verified separately;
+          # no match is preferable to forcing a weak fit if today's open inventory does not fit these controls.
+          if not state_positive['CA']:
+              failures.append(['CA','no_positive_state_result'])
+
+          print('\nSTATE_POSITIVE',state_positive)
+          print('FAILURES',json.dumps(failures,indent=2))
+          with open('state-final-branch-a1.json','w') as f:
+              json.dump({'state_report':all_report,'state_positive':state_positive,'failures':failures},f,indent=2)
+          assert not failures, failures
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: state-final-branch-a1
+          path: state-final-branch-a1.json
