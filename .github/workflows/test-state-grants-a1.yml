@@ -1,0 +1,45 @@
+name: Test state grants A1
+
+on:
+  push:
+    branches:
+      - feature/state-grants-a1
+    paths:
+      - 'backend/state_grants_live.py'
+      - 'backend/tests/test_state_grants_live.py'
+      - '.github/workflows/test-state-grants-a1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend requirements
+        run: pip install -r backend/requirements.txt
+      - name: Run state adapter tests and backend regression suite
+        run: |
+          pytest -q backend/tests/test_state_grants_live.py
+          pytest -q backend/tests
+      - name: Live smoke test supported state sources
+        run: |
+          python - <<'PY'
+          from backend.state_grants_live import search_state_grants
+          probes = {
+              'CA': 'water infrastructure community',
+              'IL': 'education community services',
+              'IA': 'energy community development',
+          }
+          for state, query in probes.items():
+              rows = search_state_grants(state, query)
+              print(state, 'RESULTS', len(rows))
+              for row in rows[:3]:
+                  print(state, row.get('title'), row.get('deadline'), row.get('official_url'))
+              assert isinstance(rows, list)
+          PY
