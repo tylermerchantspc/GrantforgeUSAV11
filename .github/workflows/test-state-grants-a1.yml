@@ -18,6 +18,9 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHONPATH: .
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      LIVE_GRANTS_ENABLED: 'false'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,6 +33,8 @@ jobs:
           pytest -q backend/tests/test_state_grants_live.py
           pytest -q backend/tests
       - name: Live smoke test supported state sources
+        env:
+          LIVE_GRANTS_ENABLED: 'true'
         run: |
           python - <<'PY'
           from backend.state_grants_live import search_state_grants
