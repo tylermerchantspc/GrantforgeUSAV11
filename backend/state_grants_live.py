@@ -206,7 +206,9 @@ def _ca_records() -> List[Dict[str, Any]]:
         # California agency URLs often live on subdomains of ca.gov; if a record points
         # elsewhere, retain the authoritative portal as the display URL instead.
         if not _allowed_state_url("CA", url):
-            url = f"https://www.grants.ca.gov/grants/{row.get('PortalID')}/"
+            # Do not invent a record-specific URL. Fall back to the authoritative
+            # statewide portal when an agency link is not on an allowlisted CA host.
+            url = STATE_SOURCE_INFO["CA"]["public_url"]
         max_amount = _parse_money(row.get("EstAmounts") or row.get("Purpose"))
         matching = str(row.get("MatchingFunds") or "").strip().lower()
         summary = " ".join(
@@ -287,7 +289,7 @@ def _il_detail(url: str) -> Optional[Dict[str, Any]]:
     min_amount, max_amount = _money_range(award_range)
     date_range = fields.get("Application Date Range", "") or program_fields.get("Deadlines", "")
     deadline = ""
-    dates = re.findall(r"\d{2}/\d{2}/20\d{2}|[A-Z][a-z]+\s+\d{1,2},\s+20\d{2}", date_range)
+    dates = re.findall(r"\d{1,2}/\d{1,2}/20\d{2}|[A-Z][a-z]+\s+\d{1,2},\s+20\d{2}", date_range)
     if dates:
         deadline = _iso_date(dates[-1])
     title = fields.get("Agency Funding Program", "") or fields.get("CSFA Popular Name", "")
@@ -348,9 +350,19 @@ def _ia_detail(url: str) -> Optional[Dict[str, Any]]:
     if not title_match:
         return None
     number, title = title_match.group(1), _clean(title_match.group(2))
-    # Conservative product scope: Iowa storefront records must explicitly describe grant funding.
-    if " grant" not in plain.lower() and "grant " not in plain.lower():
+    # Conservative product scope: reject loan-only instruments even when generic
+    # IowaGrants boilerplate elsewhere on the page happens to contain the word grant.
+    title_lower = title.lower()
+    if re.search(r"\bloans?\b", title_lower) and not re.search(r"\bgrants?\b", title_lower):
         return None
+    if not re.search(r"\bgrants?\b", title_lower):
+        explicit_grant = re.search(
+            r"\b(?:grant program|grant funding|grant award|grant funds|grant application)\b",
+            plain,
+            flags=re.I,
+        )
+        if not explicit_grant:
+            return None
     status = re.search(r"Status\s+([A-Za-z]+)", plain, flags=re.I)
     if status and status.group(1).lower() not in {"posted", "active", "open"}:
         return None
@@ -428,6 +440,37 @@ def search_state_grants(
     records = _cached(code, loader)
     candidates = [r for r in records if _query_relevant(r, " ".join(filter(None, [query, sector])))]
     return candidates[:40]
+
+
+def fetch_state_grant(state: str, identifier: str, refresh: bool = True) -> Dict[str, Any]:
+    """Re-fetch and return one official state opportunity by normalized identifier.
+
+    Payment-adjacent callers should keep refresh=True so a selected opportunity is
+    revalidated against the authoritative state source instead of trusting client data.
+    """
+    code = (state or "").strip().upper()
+    wanted = str(identifier or "").strip()
+    if code not in SUPPORTED_STATE_CODES or not wanted:
+        return {}
+    loader = {"CA": _ca_records, "IL": _il_records, "IA": _ia_records}[code]
+    if refresh:
+        try:
+            records = loader()
+        except Exception:
+            return {}
+        with _CACHE_LOCK:
+            _CACHE[code] = {"ts": time.time(), "items": [dict(x) for x in records]}
+    else:
+        records = _cached(code, loader)
+    for item in records:
+        keys = {
+            str(item.get("opp_id") or "").strip(),
+            str(item.get("opportunity_id") or "").strip(),
+            str(item.get("opp_number") or "").strip(),
+        }
+        if wanted in keys:
+            return dict(item)
+    return {}
 
 
 def state_source_status() -> Dict[str, Dict[str, Any]]:
